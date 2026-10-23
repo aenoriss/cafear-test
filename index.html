@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+
+  <title>Nomad Hub AR – test</title>
+  <script crossorigin="anonymous" src="./external/scripts/8frame-1.5.0.min.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1/dist/xr.js" async crossorigin="anonymous" data-preload-chunks="slam"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@8thwall/landing-page@1/dist/landing-page.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@8thwall/xrextras@1/dist/xrextras.js" crossorigin="anonymous"></script>
+  <script src="./app.js"></script>
+
+  <style>
+    #hud {
+      position: fixed; left: 8px; bottom: 8px; z-index: 10;
+      font: 12px/1.4 monospace; color: #0f0; background: rgba(0,0,0,.6);
+      padding: 4px 6px; white-space: pre; pointer-events: none;
+    }
+    #hud:empty { display: none; }
+  </style>
+</head>
+
+<body>
+  <div id="hud"></div>
+
+  <a-scene landing-page xrextras-loading xrextras-runtime-error
+    renderer="colorManagement: true" env-map="src: assets/envmap-city.jpg" xrweb>
+
+    <a-assets>
+      <a-asset-item id="jaula-glb" src="assets/jaula.glb"></a-asset-item>
+    </a-assets>
+
+    <a-camera position="0 1.4 0"></a-camera>
+
+    <a-light type="directional" intensity="0.8" position="1 2 1"></a-light>
+    <a-light type="ambient" intensity="0.4"></a-light>
+
+    <a-entity qr-table-anchor>
+      <a-entity gltf-model="#jaula-glb"></a-entity>
+    </a-entity>
+  </a-scene>
+</body>
+
+</html>

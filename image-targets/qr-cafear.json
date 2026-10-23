@@ -1,0 +1,23 @@
+{
+  "imagePath": "image-targets/qr-cafear_luminance.png",
+  "metadata": null,
+  "name": "qr-cafear",
+  "type": "PLANAR",
+  "properties": {
+    "left": 199,
+    "top": 0,
+    "width": 1193,
+    "height": 1591,
+    "isRotated": true,
+    "originalWidth": 1591,
+    "originalHeight": 1591
+  },
+  "resources": {
+    "originalImage": "qr-cafear_original.png",
+    "croppedImage": "qr-cafear_cropped.png",
+    "thumbnailImage": "qr-cafear_thumbnail.png",
+    "luminanceImage": "qr-cafear_luminance.png"
+  },
+  "created": 1792725631762,
+  "updated": 1792725631762
+}
