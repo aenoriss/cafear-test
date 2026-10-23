@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="es">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Editor de jaula</title>
+  <script src="./config.js"></script>
+  <script type="importmap">
+    {"imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/"
+    }}
+  </script>
+  <style>
+    :root { --bg: #15171a; --panel: #1e2125; --accent: #2ee6a6; --text: #eee; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+    body { display: grid; grid-template-columns: 1fr 320px; font: 14px system-ui, sans-serif; }
+    #view { position: relative; min-height: 0; }
+    #view canvas { display: block; width: 100%; height: 100%; }
+    #dims {
+      position: absolute; left: 12px; bottom: 12px; padding: 6px 10px; border-radius: 8px;
+      background: rgba(0,0,0,.55); font: 13px/1.4 ui-monospace, monospace;
+    }
+    #views { position: absolute; left: 12px; top: 12px; display: flex; gap: 6px; }
+    aside { background: var(--panel); padding: 8px 16px 16px; overflow-y: auto; }
+    h1 { font-size: 16px; margin: 10px 0 2px; }
+    .hint { font-size: 12px; opacity: .65; margin: 0 0 6px; }
+    button {
+      padding: 7px 12px; border: 1px solid #444; border-radius: 8px; background: #2a2e33;
+      color: var(--text); font: 600 13px system-ui, sans-serif; cursor: pointer;
+    }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #000; }
+    .actions { display: flex; gap: 8px; margin-top: 8px; }
+    .actions button { flex: 1; }
+    #status { font-size: 12px; margin-top: 8px; min-height: 1.3em; opacity: .85; }
+    @media (max-width: 700px) {
+      body { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="view">
+    <div id="views">
+      <button data-view="phone">Vista celular</button>
+      <button data-view="side">Lateral</button>
+      <button data-view="top">Arriba</button>
+    </div>
+    <div id="dims"></div>
+  </div>
+  <aside>
+    <h1>Editor de jaula</h1>
+    <p class="hint">Medidas reales. La cuadrícula de la mesa es de 1 cm.</p>
+    <div id="panel"></div>
+    <div class="actions">
+      <button id="reset">Restablecer</button>
+      <button id="save" class="primary">Guardar</button>
+    </div>
+    <div id="status"></div>
+  </aside>
+
+  <script type="module">
+    import * as THREE from 'three'
+    import {OrbitControls} from 'three/addons/controls/OrbitControls.js'
+    import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js'
+
+    const keys = Object.keys(CafeConfig.DEFAULTS)
+    const cfg = await CafeConfig.load()
+    let saved = {...cfg}
+
+    const view = document.getElementById('view')
+    const renderer = new THREE.WebGLRenderer({antialias: true})
+    renderer.setPixelRatio(devicePixelRatio)
+    view.prepend(renderer.domElement)
+
+    const scene = new THREE.Scene()
+    scene.background = new THREE.Color(0x2a2c30)
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.005, 20)
+    const controls = new OrbitControls(camera, renderer.domElement)
+    controls.enableDamping = true
+
+    new THREE.TextureLoader().load('assets/envmap-city.jpg', (tex) => {
+      tex.mapping = THREE.EquirectangularReflectionMapping
+      tex.colorSpace = THREE.SRGBColorSpace
+      scene.environment = tex
+    })
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2))
+    const sun = new THREE.DirectionalLight(0xffffff, 1.5)
+    sun.position.set(0.5, 1, 0.8)
+    scene.add(sun)
+
+    // Table with a 1 cm grid (10 cm lines brighter).
+    const table = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2),
+      new THREE.MeshStandardMaterial({color: 0x8a6a4a, roughness: 0.8}))
+    table.rotation.x = -Math.PI / 2
+    scene.add(table)
+    const fine = new THREE.GridHelper(0.6, 60, 0x000000, 0x000000)
+    fine.material.opacity = 0.12
+    fine.material.transparent = true
+    fine.position.y = 0.0003
+    scene.add(fine)
+    const coarse = new THREE.GridHelper(0.6, 6, 0xffffff, 0xffffff)
+    coarse.material.opacity = 0.25
+    coarse.material.transparent = true
+    coarse.position.y = 0.0004
+    scene.add(coarse)
+
+    // Bag and QR, rebuilt when their sizes change.
+    const frontTex = (() => {
+      const c = document.createElement('canvas')
+      c.width = 512
+      c.height = 768
+      const g = c.getContext('2d')
+      g.fillStyle = '#141416'
+      g.fillRect(0, 0, 512, 768)
+      g.fillStyle = '#e8e8e8'
+      g.font = 'bold 64px sans-serif'
+      g.fillText('NOMAD', 40, 110)
+      g.fillText('HUB', 40, 180)
+      g.fillStyle = '#2ee6a6'
+      g.font = 'bold 40px sans-serif'
+      g.fillText('FUEL FOR NOMADS', 40, 708)
+      const t = new THREE.CanvasTexture(c)
+      t.colorSpace = THREE.SRGBColorSpace
+      return t
+    })()
+    const qrTex = new THREE.TextureLoader().load('image-targets/qr-cafear_original.png')
+    qrTex.colorSpace = THREE.SRGBColorSpace
+    const side = new THREE.MeshStandardMaterial({color: 0x1c1c1f, roughness: 0.9})
+    const bag = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
+      [side, side, side, side, new THREE.MeshStandardMaterial({map: frontTex, roughness: 0.9}), side])
+    scene.add(bag)
+    const qr = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({map: qrTex}))
+    scene.add(qr)
+
+    const cage = new THREE.Group()
+    scene.add(cage)
+    new GLTFLoader().load('assets/jaula.glb', (gltf) => {
+      cage.add(gltf.scene)
+      update()
+    })
+
+    const dims = document.getElementById('dims')
+    const update = () => {
+      const bw = cfg.bagWCm / 100
+      const bh = cfg.bagHCm / 100
+      const bd = cfg.bagDCm / 100
+      bag.scale.set(bw, bh, bd)
+      bag.position.set(0, bh / 2, 0)
+      qr.scale.setScalar(cfg.qrCm / 100)
+      qr.position.set(0, cfg.qrHeightCm / 100, bd / 2 + 0.0005)
+
+      // Same function the AR page uses; here the world is metres and the table is y = 0.
+      const pose = CafeConfig.placeCage(THREE, {
+        center: qr.position.clone(),
+        normal: new THREE.Vector3(0, 0, 1),
+        up: new THREE.Vector3(0, 1, 0),
+        k: 1,
+        floorY: 0,
+      }, cfg)
+      cage.position.copy(pose.position)
+      cage.quaternion.copy(pose.quaternion)
+      cage.scale.setScalar(pose.scale)
+
+      const {height, radius} = CafeConfig.CAGE_MODEL
+      dims.textContent =
+        `jaula ${(height * pose.scale * 100).toFixed(1)} cm alto · ` +
+        `${(2 * radius * pose.scale * 100).toFixed(1)} cm ancho\n` +
+        `= ${(height * pose.scale / (cfg.bagHCm / 100) * 100).toFixed(0)}% del alto de la bolsa`
+      dims.style.whiteSpace = 'pre'
+    }
+
+    const VIEWS = {
+      // About where a phone is once the user has stepped back.
+      phone: [[0.05, 0.25, 0.45], [0, 0.07, 0.06]],
+      side: [[0.45, 0.10, 0.10], [0, 0.07, 0.05]],
+      top: [[0, 0.55, 0.12], [0, 0, 0.06]],
+    }
+    const setView = (name) => {
+      const [pos, target] = VIEWS[name]
+      camera.position.set(...pos)
+      controls.target.set(...target)
+      controls.update()
+    }
+    for (const b of document.querySelectorAll('[data-view]')) {
+      b.addEventListener('click', () => setView(b.dataset.view))
+    }
+    setView('phone')
+
+    const refresh = CafeConfig.panel(document.getElementById('panel'), cfg, update)
+    update()
+
+    const status = document.getElementById('status')
+    document.getElementById('reset').addEventListener('click', () => {
+      Object.assign(cfg, saved)
+      refresh()
+      update()
+      status.textContent = 'Valores del último guardado.'
+    })
+    document.getElementById('save').addEventListener('click', async () => {
+      const out = Object.fromEntries(keys.map(k => [k, cfg[k]]))
+      const body = JSON.stringify(out, null, 2) + '\n'
+      try {
+        const r = await fetch('api/config', {method: 'POST', body, headers: {'Content-Type': 'application/json'}})
+        if (!r.ok) throw new Error(r.status)
+        saved = {...cfg}
+        status.textContent = 'Guardado en config.json. Falta publicarlo (deploy).'
+      } catch {
+        // Static hosting: no save endpoint, so hand over the file.
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(new Blob([body], {type: 'application/json'}))
+        a.download = 'config.json'
+        a.click()
+        status.textContent = 'Sin servidor de edición: se descargó config.json.'
+      }
+    })
+
+    const resize = () => {
+      const {clientWidth: w, clientHeight: h} = view
+      renderer.setSize(w, h, false)
+      camera.aspect = w / h
+      camera.updateProjectionMatrix()
+    }
+    new ResizeObserver(resize).observe(view)
+    resize()
+    renderer.setAnimationLoop(() => {
+      controls.update()
+      renderer.render(scene, camera)
+    })
+  </script>
+</body>
+
+</html>

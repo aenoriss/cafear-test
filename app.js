@@ -4,35 +4,25 @@
 //             leaning bag doesn't tilt the cage
 //   heading = QR normal projected onto the horizontal plane
 //   floor   = 8th Wall's SLAM ground plane (y = 0)
-//   scale   = QR's tracked size / its printed size, so sizes below are in metres
+//   scale   = QR's tracked size / its printed size, so config lengths are real cm
 //
-// Tunable from the URL: ?qr=6&s=0.3&x=0&z=auto
-//   qr  printed side of the QR in cm, quiet zone included
-//   s   cage size multiplier (1 = the model's real 36 cm)
-//   x   sideways offset from QR centre to cage centre, cm (+ = viewer's right)
-//   z   distance out from the bag's front to the cage centre, cm
-//       (default: cage radius + 1 cm, so it doesn't clip into the bag)
-//   h   height of the QR's centre above the table, cm; only used with ?floor=0
-//       or ?desktop, where there is no SLAM floor
+// Placement settings (cage size, gap, offset, rotation, QR size) come from
+// config.json via config.js, and are edited in editor.html.
 //
-// ?desktop runs on a laptop webcam: no landing page, no SLAM, and by default the
-// cage stands on the QR so it fits in a webcam's view.
+// URL flags:
+//   ?edit     sliders over the live AR, to judge the size against the real bag
+//   ?debug    tracking readout and the QR outline
+//   ?floor=0  use qrHeightCm instead of 8th Wall's floor
+//   ?desktop  laptop webcam: no landing page, no SLAM, cage stands on the QR
 
 const params = new URLSearchParams(location.search)
 const DESKTOP = params.has('desktop')
-const num = (key, fallback) => {
-  const v = parseFloat(params.get(key))
-  return Number.isFinite(v) ? v : fallback
-}
-const QR_SIDE_M = num('qr', 6) / 100
-const QR_HEIGHT_M = num('h', DESKTOP ? 3 : 10) / 100
-const SIDE_OFFSET_M = num('x', 0) / 100
-const CAGE_SIZE = num('s', 0.3)
-const CAGE_RADIUS_M = 0.12 * CAGE_SIZE  // from the model's bounds
-const OUT_OFFSET_M = num('z', DESKTOP ? 0 : (CAGE_RADIUS_M + 0.01) * 100) / 100
 const DEBUG = params.has('debug')
-// ?floor=0 falls back to the ?h estimate. Desktop has no SLAM, hence no floor.
+const EDIT = params.has('edit')
 const USE_FLOOR = !DESKTOP && params.get('floor') !== '0'
+
+const CFG = {...CafeConfig.DEFAULTS}
+const cfgReady = CafeConfig.load().then(c => Object.assign(CFG, c))
 
 const TARGET_NAME = 'qr-cafear'
 const SMOOTHING = 0.25
@@ -61,9 +51,6 @@ AFRAME.registerComponent('qr-table-anchor', {
     const {THREE} = AFRAME
     this.up = new THREE.Vector3(0, 1, 0)
     this.normal = new THREE.Vector3()
-    this.right = new THREE.Vector3()
-    this.forward = new THREE.Vector3()
-    this.basis = new THREE.Matrix4()
     this.tmpQuat = new THREE.Quaternion()
     this.goalPos = new THREE.Vector3()
     this.goalQuat = new THREE.Quaternion()
@@ -71,6 +58,7 @@ AFRAME.registerComponent('qr-table-anchor', {
     this.placed = false
     this.avgSide = 0
     this.rejected = 0
+    this.last = null  // last accepted QR frame, to re-place when settings change
     this.hud = document.getElementById('hud')
 
     // Detection needs the QR to fill ≥ ~25% of the frame width (measured in sim/).
@@ -84,6 +72,25 @@ AFRAME.registerComponent('qr-table-anchor', {
     }
     this.el.sceneEl.addEventListener('xrimagefound', onImage)
     this.el.sceneEl.addEventListener('xrimageupdated', onImage)
+
+    cfgReady.then(() => {
+      this.place()
+      if (EDIT) {
+        const box = document.getElementById('edit-panel')
+        box.style.display = 'block'
+        CafeConfig.panel(box, CFG, () => this.place(),
+          ['cageCm', 'gapCm', 'xCm', 'rotDeg', 'qrCm'])
+        const copy = document.createElement('button')
+        copy.textContent = 'Copiar ajustes'
+        copy.addEventListener('click', () => {
+          const text = JSON.stringify(CFG)
+          navigator.clipboard?.writeText(text).catch(() => {})
+          copy.textContent = 'Copiado'
+          setTimeout(() => { copy.textContent = 'Copiar ajustes' }, 1500)
+        })
+        box.appendChild(copy)
+      }
+    })
   },
 
   updateGoal(d) {
@@ -104,7 +111,6 @@ AFRAME.registerComponent('qr-table-anchor', {
       this.avgSide = this.avgSide ? this.avgSide + (qrSideWorld - this.avgSide) * 0.2 : qrSideWorld
     }
     this.rejected = 0
-    const k = qrSideWorld / QR_SIDE_M
 
     // Without SLAM the world isn't gravity-aligned (the engine treats the camera
     // as looking down), so on desktop "up" is the webcam's up instead.
@@ -117,20 +123,24 @@ AFRAME.registerComponent('qr-table-anchor', {
     this.normal.addScaledVector(this.up, -this.normal.dot(this.up))
     if (this.normal.lengthSq() < 1e-4) return  // QR lying flat: no heading
     this.normal.normalize()
-    this.right.crossVectors(this.normal, this.up).negate()  // (-n) x up
 
-    this.goalPos.copy(center)
-      .addScaledVector(this.right, SIDE_OFFSET_M * k)
-      .addScaledVector(this.normal, OUT_OFFSET_M * k)
-      .addScaledVector(this.up, -QR_HEIGHT_M * k)
+    this.last = {center, q, qrSideWorld, d}
+    this.place()
+  },
+
+  // Recomputes the goal pose from the last QR frame and the current settings.
+  place() {
+    if (!this.last) return
+    const {center, q, qrSideWorld, d} = this.last
+    const k = qrSideWorld / (CFG.qrCm / 100)
     // 8th Wall's SLAM keeps a ground plane at y = 0, recomputed from stable
-    // feature points; on a tabletop that is the table. Use it instead of ?h.
-    if (USE_FLOOR) this.goalPos.y = 0
-
-    // Model +Y along up, and +X (the door) towards the viewer.
-    this.forward.crossVectors(this.normal, this.up)
-    this.goalQuat.setFromRotationMatrix(this.basis.makeBasis(this.normal, this.up, this.forward))
-    this.goalScale = k * CAGE_SIZE
+    // feature points; on a tabletop that is the table.
+    const pose = CafeConfig.placeCage(AFRAME.THREE, {
+      center, normal: this.normal, up: this.up, k, floorY: USE_FLOOR ? 0 : null,
+    }, CFG, {onQr: DESKTOP})
+    this.goalPos.copy(pose.position)
+    this.goalQuat.copy(pose.quaternion)
+    this.goalScale = pose.scale
 
     if (!this.placed) {
       const o = this.el.object3D
@@ -143,19 +153,19 @@ AFRAME.registerComponent('qr-table-anchor', {
     }
 
     if (DEBUG) {
+      const {THREE} = AFRAME
       const marker = document.getElementById('qr-marker')
       marker.object3D.position.copy(center)
       marker.object3D.quaternion.copy(q)
       marker.object3D.scale.setScalar(qrSideWorld)
       marker.object3D.visible = true
-      const cam = this.el.sceneEl.camera
-      const ndc = this.goalPos.clone().project(cam)
+      const ndc = this.goalPos.clone().project(this.el.sceneEl.camera)
       this.hud.textContent =
         `scale ${d.scale.toFixed(3)}  sw ${(d.scaledWidth || 0).toFixed(3)}  ` +
         `sh ${(d.scaledHeight || 0).toFixed(3)}\nk ${k.toFixed(3)}  ` +
         `tilt ${(Math.asin(Math.min(1, Math.abs(new THREE.Vector3(0, 0, 1).applyQuaternion(q).y))) * 57.3).toFixed(1)}°\n` +
         `QR above 8th Wall floor: ${(center.y / k * 100).toFixed(1)} cm` +
-        ` (${USE_FLOOR ? 'cage on floor' : `using h=${QR_HEIGHT_M * 100}`})\n` +
+        ` (${USE_FLOOR ? 'cage on floor' : `using ${CFG.qrHeightCm} cm`})\n` +
         `cage on screen: ${Math.abs(ndc.x) <= 1 && Math.abs(ndc.y) <= 1 && ndc.z < 1 ? 'yes' : 'NO'}` +
         ` (ndc ${ndc.x.toFixed(2)}, ${ndc.y.toFixed(2)})`
     }
@@ -175,7 +185,7 @@ AFRAME.registerComponent('qr-table-anchor', {
   updateOffscreenHint() {
     const hint = document.getElementById('offscreen')
     const p = this.goalPos.clone()
-    p.y += 0.18 * this.goalScale  // mid-height of the cage
+    p.y += CafeConfig.CAGE_MODEL.height / 2 * this.goalScale  // mid-height of the cage
     p.project(this.el.sceneEl.camera)
     let {x, y} = p
     if (p.z > 1) { x = -x; y = -y }  // behind the camera
