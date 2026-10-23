@@ -32,6 +32,13 @@
     [32, [0.26, 0.22, 0.38], FRAME, 'quieto'],
   ]
   const DURATION = KEYS[KEYS.length - 1][0]
+  // Like a user waiting for the "Acercá" banner to go: hold in front of the QR
+  // until 8th Wall has found it, then carry on with the path.
+  const HOLD_UNTIL_FOUND = 11
+  let qrFound = false
+  const onFound = () => { qrFound = true }
+  window.addEventListener('xrimagefound', onFound, true)
+  document.addEventListener('xrimagefound', onFound, true)
 
   const ease = u => 0.5 - 0.5 * Math.cos(Math.PI * u)
   const lerp3 = (a, b, u) => a.map((v, i) => v + (b[i] - v) * u)
@@ -46,14 +53,15 @@
     }
   }
 
-  const sample = (t) => {
+  // t: position along the scripted path; ts: real time, for the hand shake.
+  const sample = (t, ts = t) => {
     t = Math.min(Math.max(t, 0), DURATION)
     let i = 0
     while (i < KEYS.length - 2 && KEYS[i + 1][0] <= t) i++
     const [t0, p0, l0, label0] = KEYS[i]
     const [t1, p1, l1] = KEYS[i + 1]
     const u = t1 > t0 ? ease((t - t0) / (t1 - t0)) : 0
-    const sh = shake(t)
+    const sh = shake(ts)
     return {
       pos: lerp3(p0, p1, u).map((v, k) => v + sh.pos[k]),
       look: lerp3(l0, l1, u).map((v, k) => v + sh.look[k]),
@@ -165,8 +173,8 @@
     return canvas
   }
 
-  const poseAt = (t) => {
-    const s = sample(t)
+  const poseAt = (t, ts = t) => {
+    const s = sample(t, ts)
     const m = new THREE.Matrix4().lookAt(
       new THREE.Vector3(...s.pos), new THREE.Vector3(...s.look), new THREE.Vector3(0, 1, 0))
     return {pos: new THREE.Vector3(...s.pos), quat: new THREE.Quaternion().setFromRotationMatrix(m), label: s.label}
@@ -179,18 +187,26 @@
     0, 1, 0, 0,
     0, 0, 0, 1)
 
+  let pathT = 0
   const tick = (now) => {
     requestAnimationFrame(tick)
     const t = tStart === null ? 0 : (now - tStart) / 1000
-    const pose = poseAt(t)
+    const waiting = pathT >= HOLD_UNTIL_FOUND && !qrFound
+    if (tStart !== null && prevNow !== null && !waiting) pathT += (now - prevNow) / 1000
+    const pose = poseAt(pathT, t)
     camera.position.copy(pose.pos)
     camera.quaternion.copy(pose.quat)
     renderer.render(scene, camera)
-    if (labelEl) labelEl.textContent = `virtual phone ${t.toFixed(1)}s · ${pose.label}`
+    if (labelEl) {
+      labelEl.textContent = `virtual phone ${t.toFixed(1)}s · ` +
+        (waiting ? 'esperando que detecte el QR' : pose.label)
+    }
 
     // Device frame == camera frame (x right, y up, z out of the screen).
     const h = 1 / 120
-    const a = poseAt(t + h).pos.add(poseAt(t - h).pos).addScaledVector(pose.pos, -2)
+    const adv = waiting ? 0 : h  // the path is paused while waiting; shake isn't
+    const a = poseAt(pathT + adv, t + h).pos.add(poseAt(pathT - adv, t - h).pos)
+      .addScaledVector(pose.pos, -2)
       .multiplyScalar(1 / (h * h))
     const inv = pose.quat.clone().invert()
     const accel = a.clone().applyQuaternion(inv)

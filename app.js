@@ -20,6 +20,11 @@ const DESKTOP = params.has('desktop')
 const DEBUG = params.has('debug')
 const EDIT = params.has('edit')
 const USE_FLOOR = !DESKTOP && params.get('floor') !== '0'
+const KEEP_TRACKING = params.has('track')
+// Phones are DPR 2-3. Rendering at that density starved QR detection on a 4x
+// CPU-throttled sim (never found in 2 of 3 runs, vs 2.3 s at DPR 1). ?dpr= overrides.
+const MAX_PIXEL_RATIO = parseFloat(params.get('dpr')) || 1.5
+const LOCK_AFTER_UPDATES = 45  // accepted QR poses before locking (~1.5 s)
 
 const CFG = {...CafeConfig.DEFAULTS}
 const cfgReady = CafeConfig.load().then(c => Object.assign(CFG, c))
@@ -27,10 +32,14 @@ const cfgReady = CafeConfig.load().then(c => Object.assign(CFG, c))
 const TARGET_NAME = 'qr-cafear'
 const SMOOTHING = 0.25
 
+let targetData = null
+const enableQr = on => XR8.XrController.configure({imageTargetData: on ? [targetData] : []})
+
 fetch('image-targets/qr-cafear.json')
   .then(r => r.json())
   .then((target) => {
-    const configure = () => XR8.XrController.configure({imageTargetData: [target]})
+    targetData = target
+    const configure = () => enableQr(true)
     window.XR8 ? configure() : window.addEventListener('xrloaded', configure)
   })
 
@@ -43,6 +52,23 @@ AFRAME.registerComponent('env-map', {
       tex.colorSpace = THREE.SRGBColorSpace
       this.el.object3D.environment = tex
     })
+  },
+})
+
+AFRAME.registerComponent('pixel-ratio-cap', {
+  init() {
+    const apply = () => {
+      const r = this.el.renderer
+      const want = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO)
+      if (r && r.getPixelRatio() !== want) {
+        r.setPixelRatio(want)
+        this.el.resize()
+      }
+    }
+    // A-Frame and 8th Wall both (re)size the canvas; re-apply after each.
+    this.el.addEventListener('loaded', apply)
+    this.el.addEventListener('realityready', apply)
+    window.addEventListener('resize', () => setTimeout(apply, 0))
   },
 })
 
@@ -59,6 +85,8 @@ AFRAME.registerComponent('qr-table-anchor', {
     this.avgSide = 0
     this.rejected = 0
     this.last = null  // last accepted QR frame, to re-place when settings change
+    this.accepted = 0
+    this.locked = false
     this.hud = document.getElementById('hud')
 
     // Detection needs the QR to fill ≥ ~25% of the frame width (measured in sim/).
@@ -72,6 +100,16 @@ AFRAME.registerComponent('qr-table-anchor', {
     }
     this.el.sceneEl.addEventListener('xrimagefound', onImage)
     this.el.sceneEl.addEventListener('xrimageupdated', onImage)
+
+    // If SLAM loses the world, the cage's anchor can't be trusted: switch QR
+    // recognition back on and re-place it from the next scan.
+    this.el.sceneEl.addEventListener('xrtrackingstatus', ({detail}) => {
+      if (!this.locked || detail.status === 'NORMAL') return
+      this.locked = false
+      this.accepted = 0
+      enableQr(true)
+      console.log(`[app] tracking ${detail.status} (${detail.reason}); QR recognition back on`)
+    })
 
     cfgReady.then(() => {
       this.place()
@@ -94,6 +132,7 @@ AFRAME.registerComponent('qr-table-anchor', {
   },
 
   updateGoal(d) {
+    if (this.locked) return
     const {THREE} = AFRAME
     const q = new THREE.Quaternion(d.rotation.x, d.rotation.y, d.rotation.z, d.rotation.w)
     const center = new THREE.Vector3(d.position.x, d.position.y, d.position.z)
@@ -126,6 +165,14 @@ AFRAME.registerComponent('qr-table-anchor', {
 
     this.last = {center, q, qrSideWorld, d}
     this.place()
+
+    // Once placement has settled, SLAM alone holds the cage in place, so stop
+    // the engine searching for the QR in every frame (?track keeps it on).
+    if (!KEEP_TRACKING && !DESKTOP && ++this.accepted === LOCK_AFTER_UPDATES) {
+      enableQr(false)
+      this.locked = true
+      console.log('[app] cage locked; QR recognition off')
+    }
   },
 
   // Recomputes the goal pose from the last QR frame and the current settings.
@@ -159,15 +206,13 @@ AFRAME.registerComponent('qr-table-anchor', {
       marker.object3D.quaternion.copy(q)
       marker.object3D.scale.setScalar(qrSideWorld)
       marker.object3D.visible = true
-      const ndc = this.goalPos.clone().project(this.el.sceneEl.camera)
-      this.hud.textContent =
+      // The last line is live, in tick(): after locking there are no QR updates.
+      this.hudBase =
         `scale ${d.scale.toFixed(3)}  sw ${(d.scaledWidth || 0).toFixed(3)}  ` +
         `sh ${(d.scaledHeight || 0).toFixed(3)}\nk ${k.toFixed(3)}  ` +
         `tilt ${(Math.asin(Math.min(1, Math.abs(new THREE.Vector3(0, 0, 1).applyQuaternion(q).y))) * 57.3).toFixed(1)}°\n` +
         `QR above 8th Wall floor: ${(center.y / k * 100).toFixed(1)} cm` +
-        ` (${USE_FLOOR ? 'cage on floor' : `using ${CFG.qrHeightCm} cm`})\n` +
-        `cage on screen: ${Math.abs(ndc.x) <= 1 && Math.abs(ndc.y) <= 1 && ndc.z < 1 ? 'yes' : 'NO'}` +
-        ` (ndc ${ndc.x.toFixed(2)}, ${ndc.y.toFixed(2)})`
+        ` (${USE_FLOOR ? 'cage on floor' : `using ${CFG.qrHeightCm} cm`})`
     }
   },
 
@@ -177,6 +222,13 @@ AFRAME.registerComponent('qr-table-anchor', {
     o.position.lerp(this.goalPos, SMOOTHING)
     o.quaternion.slerp(this.goalQuat, SMOOTHING)
     o.scale.setScalar(AFRAME.THREE.MathUtils.lerp(o.scale.x, this.goalScale, SMOOTHING * 0.5))
+    if (DEBUG) {
+      const ndc = this.goalPos.clone().project(this.el.sceneEl.camera)
+      this.hud.textContent = `${this.hudBase}\n` +
+        `cage on screen: ${Math.abs(ndc.x) <= 1 && Math.abs(ndc.y) <= 1 && ndc.z < 1 ? 'yes' : 'NO'}` +
+        ` (ndc ${ndc.x.toFixed(2)}, ${ndc.y.toFixed(2)})` +
+        `\nQR recognition: ${this.locked ? 'off (cage locked)' : 'on'}`
+    }
     this.updateOffscreenHint()
   },
 

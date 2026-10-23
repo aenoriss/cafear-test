@@ -12,6 +12,11 @@
 //                                              5 s later, check the video file
 //                     [--remote https://...]   test the deployed site instead
 //                     [--headed]               show the browser window
+//                     [--profile 16]           at 16 s, profile 10 s of tracking: CPU by
+//                                              script, frame times, renderer, textures,
+//                                              downloads -> out/profile.json, .cpuprofile
+//                     [--dpr 2.625]            device pixel ratio (phones are 2-3)
+//                     [--cpu-throttle 4]       slow the CPU down N times
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -36,6 +41,105 @@ const desktop = argv.includes('--desktop')  // laptop + webcam; pair with a --la
 const virtual = argv.includes('--virtual')
 const shotEvery = Number(opt('shot-every', 5))
 const recordAt = opt('record', null)  // seconds in: tap record, 5 s later tap stop
+const profileAt = opt('profile', null)
+const dpr = Number(opt('dpr', 1))
+const cpuThrottle = Number(opt('cpu-throttle', 1))
+const PROFILE_SECONDS = 10
+
+// Self time per script from a CDP CPU profile, in ms.
+const summarizeProfile = (profile) => {
+  const byId = new Map(profile.nodes.map(n => [n.id, n]))
+  const self = new Map()
+  for (let i = 0; i < profile.samples.length; i++) {
+    const node = byId.get(profile.samples[i])
+    const dt = (profile.timeDeltas[i + 1] ?? 0) / 1000
+    self.set(node, (self.get(node) || 0) + dt)
+  }
+  const bucket = (cf) => {
+    const u = cf.url || ''
+    if (!u) return cf.functionName.startsWith('(') ? cf.functionName : '(no url: virtual phone / inline)'
+    if (u.includes('three@0.158.0')) return 'three.module.js (virtual phone only)'
+    if (u.includes('engine-binary') || /\/xr[-\w]*\.js/.test(u)) return '8th Wall engine (xr.js)'
+    if (u.includes('8frame')) return 'A-Frame (8frame)'
+    if (u.includes('xrextras')) return 'xrextras'
+    if (u.includes('landing-page')) return 'landing-page'
+    return u.split('/').pop().split('?')[0]
+  }
+  const byScript = {}
+  const byFn = {}
+  let total = 0
+  for (const [node, ms] of self) {
+    const b = bucket(node.callFrame)
+    byScript[b] = (byScript[b] || 0) + ms
+    const fn = `${node.callFrame.functionName || '(anonymous)'} @ ${b}:${node.callFrame.lineNumber + 1}`
+    byFn[fn] = (byFn[fn] || 0) + ms
+    total += ms
+  }
+  const top = (o, n) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n)
+    .map(([k, v]) => ({what: k, ms: +v.toFixed(1), pct: +(100 * v / total).toFixed(1)}))
+  return {totalMs: +total.toFixed(0), byScript: top(byScript, 15), topFunctions: top(byFn, 20)}
+}
+
+// Runs in the page: frame times, renderer stats and a texture inventory.
+const measureInPage = async (ms) => {
+  const scene = document.querySelector('a-scene')
+  const r = scene.renderer
+  const dts = []
+  let last = performance.now()
+  let running = true
+  let calls = 0
+  let triangles = 0
+  const loop = (t) => {
+    dts.push(t - last)
+    last = t
+    calls = Math.max(calls, r.info.render.calls)
+    triangles = Math.max(triangles, r.info.render.triangles)
+    if (running) requestAnimationFrame(loop)
+  }
+  requestAnimationFrame(loop)
+  await new Promise(res => setTimeout(res, ms))
+  running = false
+  dts.shift()
+  const sorted = [...dts].sort((a, b) => a - b)
+  const pct = p => +sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))].toFixed(1)
+
+  const textures = new Map()
+  scene.object3D.traverse((o) => {
+    for (const m of [].concat(o.material || [])) {
+      for (const [slot, t] of Object.entries(m)) {
+        if (!t || !t.isTexture || !t.image) continue
+        const img = t.image
+        const w = img.width || img.videoWidth || 0
+        const h = img.height || img.videoHeight || 0
+        const key = t.uuid
+        if (!textures.has(key)) {
+          // RGBA8 plus a third for mipmaps.
+          textures.set(key, {slot, name: t.name || m.name || o.name, w, h, mb: +(w * h * 4 * 4 / 3 / 1e6).toFixed(1)})
+        }
+      }
+    }
+  })
+  if (scene.object3D.environment) {
+    const img = scene.object3D.environment.image
+    textures.set('env', {slot: 'environment', name: 'envmap', w: img.width, h: img.height,
+      mb: +(img.width * img.height * 4 * 4 / 3 / 1e6).toFixed(1)})
+  }
+  const size = r.getDrawingBufferSize(new AFRAME.THREE.Vector2())
+  return {
+    frames: dts.length,
+    fps: +(1000 * dts.length / dts.reduce((a, b) => a + b, 0)).toFixed(1),
+    frameMs: {p50: pct(0.5), p95: pct(0.95), worst: +sorted[sorted.length - 1].toFixed(1)},
+    longFrames: dts.filter(d => d > 50).length,
+    renderer: {
+      pixelRatio: r.getPixelRatio(), drawingBuffer: [size.x, size.y],
+      megapixels: +(size.x * size.y / 1e6).toFixed(2),
+      drawCalls: calls, triangles,
+      geometries: r.info.memory.geometries, textures: r.info.memory.textures,
+    },
+    textures: [...textures.values()].sort((a, b) => b.mb - a.mb),
+    jsHeapMb: performance.memory ? +(performance.memory.usedJSHeapSize / 1e6).toFixed(1) : null,
+  }
+}
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json',
@@ -163,7 +267,7 @@ const main = async () => {
     userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 ' +
       '(KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36',
     viewport: {width: 412, height: 549},  // 3:4, same as the feed, so nothing is cropped
-    deviceScaleFactor: 1,
+    deviceScaleFactor: dpr,
     isMobile: true,
     hasTouch: true,
     permissions: ['camera', 'accelerometer', 'gyroscope', 'magnetometer'],
@@ -200,9 +304,49 @@ const main = async () => {
     process.exit(0)
   })
 
+  const downloads = []
+  page.on('requestfinished', async (req) => {
+    try {
+      const s = await req.sizes()
+      downloads.push({url: req.url(), kb: Math.round(s.responseBodySize / 1024), at: stamp()})
+    } catch {}
+  })
+  const cdp = await context.newCDPSession(page)
+  if (cpuThrottle > 1) await cdp.send('Emulation.setCPUThrottlingRate', {rate: cpuThrottle})
+
   const url = new URL(query, base).toString()
   lines.push(`${stamp()} open ${url}`)
   await page.goto(url, {waitUntil: 'load'})
+
+  if (profileAt !== null) {
+    await page.waitForTimeout(Number(profileAt) * 1000)
+    await cdp.send('Profiler.enable')
+    await cdp.send('Profiler.setSamplingInterval', {interval: 500})
+    await cdp.send('Profiler.start')
+    const inPage = await page.evaluate(measureInPage, PROFILE_SECONDS * 1000)
+    const {profile} = await cdp.send('Profiler.stop')
+    fs.writeFileSync(path.join(outDir, 'profile.cpuprofile'), JSON.stringify(profile))
+    await page.screenshot({path: path.join(outDir, 'profile_view.png')})
+
+    const when = re => lines.find(l => re.test(l))?.trim().split(/\s+/)[0] || null
+    const report = {
+      setup: {dpr, cpuThrottle, headed, url},
+      timeline: {realityready: when(/\[sim\] realityready/), qrFound: when(/\[sim\] xrimagefound/)},
+      ...inPage,
+      cpu: summarizeProfile(profile),
+      downloads: {
+        totalKb: downloads.reduce((a, d) => a + d.kb, 0),
+        largest: downloads.sort((a, b) => b.kb - a.kb).slice(0, 12)
+          .map(d => ({kb: d.kb, url: d.url.replace(/^https?:\/\/[^/]+/, ''), at: d.at})),
+      },
+    }
+    fs.writeFileSync(path.join(outDir, 'profile.json'), JSON.stringify(report, null, 2))
+    fs.writeFileSync(path.join(outDir, 'console.log'), lines.join('\n'))
+    console.log(JSON.stringify(report, null, 2))
+    await browser.close()
+    server?.close()
+    return
+  }
 
   for (let s = shotEvery; s <= seconds; s += shotEvery) {
     await page.waitForTimeout(shotEvery * 1000)
