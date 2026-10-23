@@ -21,11 +21,26 @@
       padding: 4px 6px; white-space: pre; pointer-events: none;
     }
     #hud:empty { display: none; }
+    #offscreen {
+      position: fixed; z-index: 10; display: none; transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    #offscreen .arrow {
+      font-size: 44px; line-height: 1; color: #2ee6a6; text-shadow: 0 1px 3px rgba(0,0,0,.8);
+    }
+    #offscreen-text {
+      position: fixed; z-index: 10; left: 50%; bottom: 72px; transform: translateX(-50%);
+      display: none; padding: 8px 14px; border-radius: 18px; background: rgba(0,0,0,.6);
+      font: 600 15px/1.2 system-ui, sans-serif; color: #fff; white-space: nowrap;
+      pointer-events: none;
+    }
   </style>
 </head>
 
 <body>
   <div id="hud"></div>
+  <div id="offscreen"><div class="arrow">➜</div></div>
+  <div id="offscreen-text"></div>
 
   <a-scene landing-page xrextras-loading xrextras-runtime-error
     renderer="colorManagement: true" env-map="src: assets/envmap-city.jpg" xrweb>
@@ -38,6 +53,14 @@
 
     <a-light type="directional" intensity="0.8" position="1 2 1"></a-light>
     <a-light type="ambient" intensity="0.4"></a-light>
+
+    <!-- ?debug only: outline of the tracked QR, with its local axes -->
+    <a-entity id="qr-marker" visible="false">
+      <a-plane width="1" height="1" material="color: #0f0; wireframe: true"></a-plane>
+      <a-entity line="start: 0 0 0; end: 0.5 0 0; color: red"></a-entity>
+      <a-entity line="start: 0 0 0; end: 0 0.5 0; color: lime"></a-entity>
+      <a-entity line="start: 0 0 0; end: 0 0 0.5; color: blue"></a-entity>
+    </a-entity>
 
     <a-entity qr-table-anchor>
       <a-entity gltf-model="#jaula-glb"></a-entity>
