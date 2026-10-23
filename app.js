@@ -216,15 +216,29 @@ AFRAME.registerComponent('qr-table-anchor', {
     }
   },
 
-  tick() {
+  tick(time, dt) {
+    // The debug readout is rewritten twice a second, not every frame: per-frame
+    // DOM writes stopped QR detection in the sim (?debug at DPR 1, 3 of 3 runs).
+    const hudDue = DEBUG && time - (this.hudAt || 0) > 500
+    if (DEBUG) {
+      // Smoothed over ~1 s, so it can be read on the phone.
+      this.frameMs = this.frameMs ? this.frameMs + (dt - this.frameMs) * 0.05 : dt
+      if (hudDue) {
+        this.hudAt = time
+        const pr = this.el.sceneEl.renderer.getPixelRatio()
+        this.perfLine = `${(1000 / this.frameMs).toFixed(0)} fps (${this.frameMs.toFixed(0)} ms)` +
+          ` · DPR ${pr}${DESKTOP ? ' · no SLAM' : ''}`
+        if (!this.placed) this.hud.textContent = this.perfLine
+      }
+    }
     if (!this.placed) return
     const o = this.el.object3D
     o.position.lerp(this.goalPos, SMOOTHING)
     o.quaternion.slerp(this.goalQuat, SMOOTHING)
     o.scale.setScalar(AFRAME.THREE.MathUtils.lerp(o.scale.x, this.goalScale, SMOOTHING * 0.5))
-    if (DEBUG) {
+    if (hudDue) {
       const ndc = this.goalPos.clone().project(this.el.sceneEl.camera)
-      this.hud.textContent = `${this.hudBase}\n` +
+      this.hud.textContent = `${this.perfLine}\n${this.hudBase}\n` +
         `cage on screen: ${Math.abs(ndc.x) <= 1 && Math.abs(ndc.y) <= 1 && ndc.z < 1 ? 'yes' : 'NO'}` +
         ` (ndc ${ndc.x.toFixed(2)}, ${ndc.y.toFixed(2)})` +
         `\nQR recognition: ${this.locked ? 'off (cage locked)' : 'on'}`
