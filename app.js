@@ -1,20 +1,22 @@
-// Places the cage on the (estimated) table beside the bag, from the QR's pose.
+// Places a miniature cage on the table in front of the bag, below the QR.
 //
-// The table is never detected. It is inferred:
 //   up      = world +Y (SLAM world is gravity-aligned), not the QR normal, so a
 //             leaning bag doesn't tilt the cage
 //   heading = QR normal projected onto the horizontal plane
-//   scale   = QR's tracked size / its printed size, so the model stays 1:1 in metres
+//   floor   = 8th Wall's SLAM ground plane (y = 0)
+//   scale   = QR's tracked size / its printed size, so sizes below are in metres
 //
-// Tunable from the URL: ?qr=6&h=10&x=22&s=1
+// Tunable from the URL: ?qr=6&s=0.3&x=0&z=auto
 //   qr  printed side of the QR in cm, quiet zone included
-//   h   height of the QR's centre above the table, cm (only with ?floor=0 or ?desktop;
-//       otherwise the table is 8th Wall's SLAM ground plane)
+//   s   cage size multiplier (1 = the model's real 36 cm)
 //   x   sideways offset from QR centre to cage centre, cm (+ = viewer's right)
-//   s   cage size multiplier (1 = real size)
+//   z   distance out from the bag's front to the cage centre, cm
+//       (default: cage radius + 1 cm, so it doesn't clip into the bag)
+//   h   height of the QR's centre above the table, cm; only used with ?floor=0
+//       or ?desktop, where there is no SLAM floor
 //
 // ?desktop runs on a laptop webcam: no landing page, no SLAM, and by default the
-// cage sits on the QR at 30% so it fits in a webcam's view.
+// cage stands on the QR so it fits in a webcam's view.
 
 const params = new URLSearchParams(location.search)
 const DESKTOP = params.has('desktop')
@@ -24,8 +26,10 @@ const num = (key, fallback) => {
 }
 const QR_SIDE_M = num('qr', 6) / 100
 const QR_HEIGHT_M = num('h', DESKTOP ? 3 : 10) / 100
-const SIDE_OFFSET_M = num('x', DESKTOP ? 0 : 22) / 100
-const CAGE_SIZE = num('s', DESKTOP ? 0.3 : 1)
+const SIDE_OFFSET_M = num('x', 0) / 100
+const CAGE_SIZE = num('s', 0.3)
+const CAGE_RADIUS_M = 0.12 * CAGE_SIZE  // from the model's bounds
+const OUT_OFFSET_M = num('z', DESKTOP ? 0 : (CAGE_RADIUS_M + 0.01) * 100) / 100
 const DEBUG = params.has('debug')
 // ?floor=0 falls back to the ?h estimate. Desktop has no SLAM, hence no floor.
 const USE_FLOOR = !DESKTOP && params.get('floor') !== '0'
@@ -117,6 +121,7 @@ AFRAME.registerComponent('qr-table-anchor', {
 
     this.goalPos.copy(center)
       .addScaledVector(this.right, SIDE_OFFSET_M * k)
+      .addScaledVector(this.normal, OUT_OFFSET_M * k)
       .addScaledVector(this.up, -QR_HEIGHT_M * k)
     // 8th Wall's SLAM keeps a ground plane at y = 0, recomputed from stable
     // feature points; on a tabletop that is the table. Use it instead of ?h.
@@ -165,8 +170,8 @@ AFRAME.registerComponent('qr-table-anchor', {
     this.updateOffscreenHint()
   },
 
-  // The QR is scanned from ~20 cm, where a cage 22 cm to the side is out of
-  // frame. Point at it until the user steps back far enough to see it.
+  // The QR is scanned from ~20 cm, where the cage on the table below can be out
+  // of frame. Point at it until the user steps back far enough to see it.
   updateOffscreenHint() {
     const hint = document.getElementById('offscreen')
     const p = this.goalPos.clone()

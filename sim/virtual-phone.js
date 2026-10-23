@@ -20,16 +20,16 @@
 
   // Scripted path: [t (s), camera position, look-at point, label].
   const QR = [0, CFG.qrCenterY, QR_Z]
-  const FRAME = [0.12, 0.13, 0.04]  // between bag and where the cage lands
+  const FRAME = [0, 0.07, 0.07]  // bag front and the miniature cage below the QR
   const KEYS = [
     [0, [0.05, 0.28, 0.70], [0, 0.12, 0], 'lejos: el QR es chico'],
     [3, [0.05, 0.28, 0.70], [0, 0.12, 0], 'lejos: el QR es chico'],
     [7, [0.00, 0.12, 0.20], QR, 'acercando'],
     [11, [0.00, 0.12, 0.20], QR, 'escaneando de cerca'],
-    [17, [0.22, 0.38, 0.85], FRAME, 'alejándose'],
-    [23, [-0.20, 0.32, 0.80], FRAME, 'rodeando'],
-    [29, [0.48, 0.30, 0.68], FRAME, 'rodeando'],
-    [33, [0.48, 0.30, 0.68], FRAME, 'quieto'],
+    [16, [0.06, 0.26, 0.45], FRAME, 'alejándose'],
+    [22, [-0.20, 0.24, 0.40], FRAME, 'rodeando'],
+    [28, [0.26, 0.22, 0.38], FRAME, 'rodeando'],
+    [32, [0.26, 0.22, 0.38], FRAME, 'quieto'],
   ]
   const DURATION = KEYS[KEYS.length - 1][0]
 
