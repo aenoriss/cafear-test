@@ -8,6 +8,8 @@
 //                     [--virtual]              camera = virtual phone in a 3D scene
 //                                              (virtual-phone.js), with matching IMU
 //                     [--shot-every 5]         seconds between screenshots
+//                     [--record 20]            at 20 s tap the record button, stop
+//                                              5 s later, check the video file
 //                     [--remote https://...]   test the deployed site instead
 //                     [--headed]               show the browser window
 import http from 'node:http'
@@ -33,6 +35,7 @@ const headed = argv.includes('--headed')
 const desktop = argv.includes('--desktop')  // laptop + webcam; pair with a --landscape feed
 const virtual = argv.includes('--virtual')
 const shotEvery = Number(opt('shot-every', 5))
+const recordAt = opt('record', null)  // seconds in: tap record, 5 s later tap stop
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json',
@@ -54,12 +57,44 @@ const serve = () => new Promise((resolve) => {
 })
 
 // Runs in the page before any of its scripts.
-const initScript = ({desktop, virtual}) => {
+const initScript = ({desktop, virtual, headed}) => {
   const EVENTS = [
     'xrloaded', 'realityready', 'realityerror', 'camerastatuschange',
     'xrimageloading', 'xrimagescanning', 'xrimagefound', 'xrimagelost',
     'xrtrackingstatus',
+    'mediarecorder-recordstart', 'mediarecorder-recordstop', 'mediarecorder-recorderror',
+    'mediarecorder-previewready', 'mediarecorder-previewopened', 'mediarecorder-finalizeprogress',
   ]
+  // The recorded file, so the runner can inspect it. On Android/desktop it
+  // arrives with previewready; recordcomplete may come later, after export.
+  // The recorder dispatches on window, not the document.
+  for (const name of ['mediarecorder-previewready', 'mediarecorder-recordcomplete']) {
+    window.addEventListener(name, (e) => {
+      const b = e.detail && e.detail.videoBlob
+      if (b) window.__lastVideo = b
+      console.log(`[sim] ${name} blob ${b ? `${b.type} ${b.size} bytes` : 'none'}`)
+    })
+  }
+
+  // Phones open the OS share sheet (WhatsApp, Instagram...) via navigator.share
+  // with the file. The sim saves a copy to out/shared/; headed, it then opens
+  // the Windows share sheet too; headless, there is none to open.
+  const nativeShare = headed && navigator.share ? navigator.share.bind(navigator) : null
+  const nativeCanShare = headed && navigator.canShare ? navigator.canShare.bind(navigator) : null
+  navigator.canShare = data => (nativeCanShare ? nativeCanShare(data) : !!(data && data.files && data.files.length))
+  navigator.share = async (data) => {
+    const files = (data.files || []).map(f => ({name: f.name, type: f.type, size: f.size}))
+    console.log(`[sim] navigator.share ${JSON.stringify({files, title: data.title, text: data.text})}`)
+    const f = data.files && data.files[0]
+    if (f) {
+      window.__sharedFile = f
+      const bytes = new Uint8Array(await f.arrayBuffer())
+      let bin = ''
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+      await window.__simSave(f.name, btoa(bin))
+    }
+    if (nativeShare) return nativeShare(data)
+  }
   const log = (name, detail) => {
     let s
     try { s = JSON.stringify(detail) } catch { s = String(detail) }
@@ -133,7 +168,14 @@ const main = async () => {
     hasTouch: true,
     permissions: ['camera', 'accelerometer', 'gyroscope', 'magnetometer'],
   })
-  await context.addInitScript(initScript, {desktop, virtual})
+  await context.exposeFunction('__simSave', (name, b64) => {
+    const dir = path.join(outDir, 'shared')
+    fs.mkdirSync(dir, {recursive: true})
+    const file = path.join(dir, path.basename(name))
+    fs.writeFileSync(file, Buffer.from(b64, 'base64'))
+    console.log(`shared file saved: ${file}`)
+  })
+  await context.addInitScript(initScript, {desktop, virtual, headed})
   if (virtual) {
     await context.addInitScript({path: path.join(here, 'virtual-phone.js')})
   }
@@ -158,6 +200,71 @@ const main = async () => {
     await page.screenshot({path: path.join(outDir, `shot_${String(s).padStart(2, '0')}s.png`)})
     const hud = await page.evaluate(() => document.getElementById('hud')?.textContent || '')
     lines.push(`${stamp()} HUD ${hud.replace(/\n/g, ' | ')}`)
+  }
+
+  if (recordAt !== null) {
+    const shot = name => page.screenshot({path: path.join(outDir, `rec_${name}.png`)})
+    const button = page.locator('#recorder-button')
+    await shot('0_before')
+    await button.tap()
+    lines.push(`${stamp()} SIM tapped record`)
+    await page.waitForTimeout(2500)
+    await shot('1_recording')
+    await page.waitForTimeout(2500)
+    await button.tap()
+    lines.push(`${stamp()} SIM tapped stop`)
+    await page.waitForTimeout(8000)
+    await shot('2_preview')
+
+    // Tap the preview's share button, as a user would to send it to WhatsApp/IG.
+    const share = page.locator('#actionButton')
+    if (await share.count()) {
+      lines.push(`${stamp()} SIM share button: "${(await share.innerText()).trim()}"`)
+      await share.tap()
+      await page.waitForTimeout(3000)
+      await shot('3_after_share')
+    } else {
+      lines.push(`${stamp()} SIM no #actionButton in preview`)
+    }
+    const video = await page.evaluate(async () => {
+      const b = window.__sharedFile || window.__lastVideo
+      if (!b) return null
+      const v = document.createElement('video')
+      v.muted = true
+      v.src = URL.createObjectURL(b)
+      await new Promise((res) => {
+        v.onloadedmetadata = res
+        v.onerror = res
+        setTimeout(res, 5000)
+      })
+      // WebM from MediaRecorder reports Infinity until seeked to the end.
+      if (v.duration === Infinity) {
+        v.currentTime = 1e9
+        await new Promise((res) => { v.ontimeupdate = res; setTimeout(res, 3000) })
+      }
+      // A frame from the middle of the clip, to see what was actually recorded.
+      const duration = v.duration
+      v.currentTime = Math.min(duration, 1e3) / 2
+      await new Promise((res) => { v.onseeked = res; setTimeout(res, 3000) })
+      const c = document.createElement('canvas')
+      c.width = v.videoWidth
+      c.height = v.videoHeight
+      c.getContext('2d').drawImage(v, 0, 0)
+      const frame = c.toDataURL('image/png').split(',')[1]
+      const bytes = new Uint8Array(await b.arrayBuffer())
+      let bin = ''
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+      return {type: b.type, size: b.size, duration, w: v.videoWidth, h: v.videoHeight, b64: btoa(bin), frame}
+    })
+    if (video) {
+      const ext = video.type.includes('mp4') ? 'mp4' : 'webm'
+      fs.writeFileSync(path.join(outDir, `recording.${ext}`), Buffer.from(video.b64, 'base64'))
+      fs.writeFileSync(path.join(outDir, 'rec_frame.png'), Buffer.from(video.frame, 'base64'))
+      delete video.b64
+      delete video.frame
+    }
+    lines.push(`${stamp()} VIDEO ${JSON.stringify(video)}`)
+    console.log('video:', JSON.stringify(video))
   }
 
   const state = await page.evaluate(() => {

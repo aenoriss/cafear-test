@@ -30,7 +30,8 @@
       font-size: 44px; line-height: 1; color: #2ee6a6; text-shadow: 0 1px 3px rgba(0,0,0,.8);
     }
     #offscreen-text {
-      position: fixed; z-index: 10; left: 50%; bottom: 72px; transform: translateX(-50%);
+      /* Above the record button */
+      position: fixed; z-index: 10; left: 50%; bottom: 140px; transform: translateX(-50%);
       display: none; padding: 8px 14px; border-radius: 18px; background: rgba(0,0,0,.6);
       font: 600 15px/1.2 system-ui, sans-serif; color: #fff; white-space: nowrap;
       pointer-events: none;
@@ -63,6 +64,21 @@
     </a-assets>
 
     <a-camera position="0 1.4 0"></a-camera>
+
+    <!-- Floating record button (tap to start, tap to stop), then a preview with
+         share/save. 8th Wall's built-in recorder; no end card, no mic prompt. -->
+    <xrextras-capture-button capture-mode="fixed"></xrextras-capture-button>
+    <xrextras-capture-config
+      max-duration-ms="30000"
+      max-dimension="1280"
+      enable-end-card="false"
+      file-name-prefix="nomad-hub-"
+      request-mic="manual"
+      include-scene-audio="false"></xrextras-capture-config>
+    <xrextras-capture-preview
+      action-button-share-text="Compartir"
+      action-button-view-text="Ver"
+      finalize-text="Exportando..."></xrextras-capture-preview>
 
     <a-light type="directional" intensity="0.8" position="1 2 1"></a-light>
     <a-light type="ambient" intensity="0.4"></a-light>
