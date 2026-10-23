@@ -5,6 +5,9 @@
 // records every 8th Wall event plus periodic screenshots.
 //
 // Usage: node run.mjs [--feed out/feed.y4m] [--query "?debug"] [--seconds 25]
+//                     [--virtual]              camera = virtual phone in a 3D scene
+//                                              (virtual-phone.js), with matching IMU
+//                     [--shot-every 5]         seconds between screenshots
 //                     [--remote https://...]   test the deployed site instead
 //                     [--headed]               show the browser window
 import http from 'node:http'
@@ -28,6 +31,8 @@ const seconds = Number(opt('seconds', 25))
 const remote = opt('remote', null)
 const headed = argv.includes('--headed')
 const desktop = argv.includes('--desktop')  // laptop + webcam; pair with a --landscape feed
+const virtual = argv.includes('--virtual')
+const shotEvery = Number(opt('shot-every', 5))
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json',
@@ -49,7 +54,7 @@ const serve = () => new Promise((resolve) => {
 })
 
 // Runs in the page before any of its scripts.
-const initScript = ({desktop}) => {
+const initScript = ({desktop, virtual}) => {
   const EVENTS = [
     'xrloaded', 'realityready', 'realityerror', 'camerastatuschange',
     'xrimageloading', 'xrimagescanning', 'xrimagefound', 'xrimagelost',
@@ -77,8 +82,9 @@ const initScript = ({desktop}) => {
     return gum(c)
   }
 
-  // A phone held upright and still: gravity along device +Y. Laptops have no IMU.
-  if (!desktop) setInterval(() => {
+  // A phone held upright and still: gravity along device +Y. Laptops have no IMU,
+  // and the virtual phone fires its own events.
+  if (!desktop && !virtual) setInterval(() => {
     window.dispatchEvent(new DeviceMotionEvent('devicemotion', {
       acceleration: {x: 0, y: 0, z: 0},
       accelerationIncludingGravity: {x: 0, y: 9.81, z: 0},
@@ -93,7 +99,7 @@ const initScript = ({desktop}) => {
 
 const main = async () => {
   fs.mkdirSync(outDir, {recursive: true})
-  if (!fs.existsSync(feed)) throw new Error(`no feed at ${feed}; run make_feed.py first`)
+  if (!virtual && !fs.existsSync(feed)) throw new Error(`no feed at ${feed}; run make_feed.py first`)
 
   let server = null
   let base = remote
@@ -108,8 +114,10 @@ const main = async () => {
     args: [
       '--use-fake-ui-for-media-stream',
       '--use-fake-device-for-media-stream',
-      `--use-file-for-fake-video-capture=${feed}`,
+      ...(virtual ? [] : [`--use-file-for-fake-video-capture=${feed}`]),
       '--enable-unsafe-swiftshader',
+      // A real camera stream may autoplay; the virtual phone's canvas stream may not.
+      '--autoplay-policy=no-user-gesture-required',
       '--ignore-gpu-blocklist',
     ],
   })
@@ -125,7 +133,10 @@ const main = async () => {
     hasTouch: true,
     permissions: ['camera', 'accelerometer', 'gyroscope', 'magnetometer'],
   })
-  await context.addInitScript(initScript, {desktop})
+  await context.addInitScript(initScript, {desktop, virtual})
+  if (virtual) {
+    await context.addInitScript({path: path.join(here, 'virtual-phone.js')})
+  }
   const page = await context.newPage()
 
   const lines = []
@@ -142,9 +153,11 @@ const main = async () => {
   lines.push(`${stamp()} open ${url}`)
   await page.goto(url, {waitUntil: 'load'})
 
-  for (let s = 0; s < seconds; s += 5) {
-    await page.waitForTimeout(5000)
-    await page.screenshot({path: path.join(outDir, `shot_${String(s + 5).padStart(2, '0')}s.png`)})
+  for (let s = shotEvery; s <= seconds; s += shotEvery) {
+    await page.waitForTimeout(shotEvery * 1000)
+    await page.screenshot({path: path.join(outDir, `shot_${String(s).padStart(2, '0')}s.png`)})
+    const hud = await page.evaluate(() => document.getElementById('hud')?.textContent || '')
+    lines.push(`${stamp()} HUD ${hud.replace(/\n/g, ' | ')}`)
   }
 
   const state = await page.evaluate(() => {
@@ -157,6 +170,10 @@ const main = async () => {
       cagePos: o && [o.position.x, o.position.y, o.position.z].map(v => +v.toFixed(3)),
       cageScale: o && +o.scale.x.toFixed(3),
       bodyText: document.body.innerText.slice(0, 300),
+      videos: [...document.querySelectorAll('video')].map(v => ({
+        readyState: v.readyState, w: v.videoWidth, h: v.videoHeight, paused: v.paused,
+        muted: v.muted, autoplay: v.autoplay, connected: v.isConnected,
+      })),
     }
   })
   lines.push(`${stamp()} STATE ${JSON.stringify(state)}`)

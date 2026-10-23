@@ -8,7 +8,8 @@
 //
 // Tunable from the URL: ?qr=6&h=10&x=22&s=1
 //   qr  printed side of the QR in cm, quiet zone included
-//   h   height of the QR's centre above the table, cm
+//   h   height of the QR's centre above the table, cm (only with ?floor=0 or ?desktop;
+//       otherwise the table is 8th Wall's SLAM ground plane)
 //   x   sideways offset from QR centre to cage centre, cm (+ = viewer's right)
 //   s   cage size multiplier (1 = real size)
 //
@@ -26,6 +27,8 @@ const QR_HEIGHT_M = num('h', DESKTOP ? 3 : 10) / 100
 const SIDE_OFFSET_M = num('x', DESKTOP ? 0 : 22) / 100
 const CAGE_SIZE = num('s', DESKTOP ? 0.3 : 1)
 const DEBUG = params.has('debug')
+// ?floor=0 falls back to the ?h estimate. Desktop has no SLAM, hence no floor.
+const USE_FLOOR = !DESKTOP && params.get('floor') !== '0'
 
 const TARGET_NAME = 'qr-cafear'
 const SMOOTHING = 0.25
@@ -62,6 +65,8 @@ AFRAME.registerComponent('qr-table-anchor', {
     this.goalQuat = new THREE.Quaternion()
     this.goalScale = 1
     this.placed = false
+    this.avgSide = 0
+    this.rejected = 0
     this.hud = document.getElementById('hud')
 
     // Detection needs the QR to fill ≥ ~25% of the frame width (measured in sim/).
@@ -84,6 +89,17 @@ AFRAME.registerComponent('qr-table-anchor', {
 
     // The 3:4 crop spans the QR's full side along its long axis.
     const qrSideWorld = d.scale * Math.max(d.scaledWidth || 1, d.scaledHeight || 1)
+
+    // Single bad frames happen (the simulator logged one at 1000x the true
+    // size). Skip a size far off the running average, unless it persists.
+    const ratio = this.avgSide ? qrSideWorld / this.avgSide : 1
+    if (ratio > 1.5 || ratio < 0.67) {
+      if (++this.rejected < 15) return
+      this.avgSide = qrSideWorld  // it persisted, so it's real
+    } else {
+      this.avgSide = this.avgSide ? this.avgSide + (qrSideWorld - this.avgSide) * 0.2 : qrSideWorld
+    }
+    this.rejected = 0
     const k = qrSideWorld / QR_SIDE_M
 
     // Without SLAM the world isn't gravity-aligned (the engine treats the camera
@@ -102,6 +118,9 @@ AFRAME.registerComponent('qr-table-anchor', {
     this.goalPos.copy(center)
       .addScaledVector(this.right, SIDE_OFFSET_M * k)
       .addScaledVector(this.up, -QR_HEIGHT_M * k)
+    // 8th Wall's SLAM keeps a ground plane at y = 0, recomputed from stable
+    // feature points; on a tabletop that is the table. Use it instead of ?h.
+    if (USE_FLOOR) this.goalPos.y = 0
 
     // Model +Y along up, and +X (the door) towards the viewer.
     this.forward.crossVectors(this.normal, this.up)
@@ -130,6 +149,8 @@ AFRAME.registerComponent('qr-table-anchor', {
         `scale ${d.scale.toFixed(3)}  sw ${(d.scaledWidth || 0).toFixed(3)}  ` +
         `sh ${(d.scaledHeight || 0).toFixed(3)}\nk ${k.toFixed(3)}  ` +
         `tilt ${(Math.asin(Math.min(1, Math.abs(new THREE.Vector3(0, 0, 1).applyQuaternion(q).y))) * 57.3).toFixed(1)}°\n` +
+        `QR above 8th Wall floor: ${(center.y / k * 100).toFixed(1)} cm` +
+        ` (${USE_FLOOR ? 'cage on floor' : `using h=${QR_HEIGHT_M * 100}`})\n` +
         `cage on screen: ${Math.abs(ndc.x) <= 1 && Math.abs(ndc.y) <= 1 && ndc.z < 1 ? 'yes' : 'NO'}` +
         ` (ndc ${ndc.x.toFixed(2)}, ${ndc.y.toFixed(2)})`
     }
