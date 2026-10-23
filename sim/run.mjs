@@ -191,6 +191,15 @@ const main = async () => {
     if (r.status() >= 400) lines.push(`${stamp()} HTTP${r.status()} ${r.url()}`)
   })
 
+  // Closing the headed window ends the session: keep the log, exit cleanly.
+  page.on('close', () => {
+    lines.push(`${stamp()} window closed`)
+    fs.writeFileSync(path.join(outDir, 'console.log'), lines.join('\n'))
+    console.log(`window closed; log in ${outDir}`)
+    server?.close()
+    process.exit(0)
+  })
+
   const url = new URL(query, base).toString()
   lines.push(`${stamp()} open ${url}`)
   await page.goto(url, {waitUntil: 'load'})
