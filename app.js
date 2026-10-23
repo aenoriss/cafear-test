@@ -6,19 +6,25 @@
 //   heading = QR normal projected onto the horizontal plane
 //   scale   = QR's tracked size / its printed size, so the model stays 1:1 in metres
 //
-// Tunable from the URL, all in cm: ?qr=6&h=10&x=22
-//   qr  printed side of the QR, quiet zone included
-//   h   height of the QR's centre above the table
-//   x   sideways offset from QR centre to cage centre (+ = viewer's right)
+// Tunable from the URL: ?qr=6&h=10&x=22&s=1
+//   qr  printed side of the QR in cm, quiet zone included
+//   h   height of the QR's centre above the table, cm
+//   x   sideways offset from QR centre to cage centre, cm (+ = viewer's right)
+//   s   cage size multiplier (1 = real size)
+//
+// ?desktop runs on a laptop webcam: no landing page, no SLAM, and by default the
+// cage sits on the QR at 30% so it fits in a webcam's view.
 
 const params = new URLSearchParams(location.search)
-const cm = (key, fallback) => {
+const DESKTOP = params.has('desktop')
+const num = (key, fallback) => {
   const v = parseFloat(params.get(key))
-  return (Number.isFinite(v) ? v : fallback) / 100
+  return Number.isFinite(v) ? v : fallback
 }
-const QR_SIDE_M = cm('qr', 6)
-const QR_HEIGHT_M = cm('h', 10)
-const SIDE_OFFSET_M = cm('x', 22)
+const QR_SIDE_M = num('qr', 6) / 100
+const QR_HEIGHT_M = num('h', DESKTOP ? 3 : 10) / 100
+const SIDE_OFFSET_M = num('x', DESKTOP ? 0 : 22) / 100
+const CAGE_SIZE = num('s', DESKTOP ? 0.3 : 1)
 const DEBUG = params.has('debug')
 
 const TARGET_NAME = 'qr-cafear'
@@ -49,6 +55,9 @@ AFRAME.registerComponent('qr-table-anchor', {
     this.up = new THREE.Vector3(0, 1, 0)
     this.normal = new THREE.Vector3()
     this.right = new THREE.Vector3()
+    this.forward = new THREE.Vector3()
+    this.basis = new THREE.Matrix4()
+    this.tmpQuat = new THREE.Quaternion()
     this.goalPos = new THREE.Vector3()
     this.goalQuat = new THREE.Quaternion()
     this.goalScale = 1
@@ -77,20 +86,27 @@ AFRAME.registerComponent('qr-table-anchor', {
     const qrSideWorld = d.scale * Math.max(d.scaledWidth || 1, d.scaledHeight || 1)
     const k = qrSideWorld / QR_SIDE_M
 
+    // Without SLAM the world isn't gravity-aligned (the engine treats the camera
+    // as looking down), so on desktop "up" is the webcam's up instead.
+    if (DESKTOP) {
+      this.up.set(0, 1, 0).applyQuaternion(this.el.sceneEl.camera.getWorldQuaternion(this.tmpQuat))
+    }
+
+    // Normal projected onto the plane perpendicular to up.
     this.normal.set(0, 0, 1).applyQuaternion(q)
-    this.normal.y = 0
+    this.normal.addScaledVector(this.up, -this.normal.dot(this.up))
     if (this.normal.lengthSq() < 1e-4) return  // QR lying flat: no heading
     this.normal.normalize()
     this.right.crossVectors(this.normal, this.up).negate()  // (-n) x up
 
     this.goalPos.copy(center)
       .addScaledVector(this.right, SIDE_OFFSET_M * k)
-    this.goalPos.y -= QR_HEIGHT_M * k
+      .addScaledVector(this.up, -QR_HEIGHT_M * k)
 
-    // Door is on the model's +X; turn it towards the viewer.
-    const yaw = Math.atan2(-this.normal.z, this.normal.x)
-    this.goalQuat.setFromAxisAngle(this.up, yaw)
-    this.goalScale = k
+    // Model +Y along up, and +X (the door) towards the viewer.
+    this.forward.crossVectors(this.normal, this.up)
+    this.goalQuat.setFromRotationMatrix(this.basis.makeBasis(this.normal, this.up, this.forward))
+    this.goalScale = k * CAGE_SIZE
 
     if (!this.placed) {
       const o = this.el.object3D

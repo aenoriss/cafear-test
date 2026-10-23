@@ -42,6 +42,8 @@
   <div id="offscreen"><div class="arrow">➜</div></div>
   <div id="offscreen-text"></div>
 
+  <!-- Stamped by the script below, so ?desktop can change xrweb before it initialises -->
+  <template id="scene-tpl">
   <a-scene landing-page xrextras-loading xrextras-runtime-error
     renderer="colorManagement: true" env-map="src: assets/envmap-city.jpg" xrweb>
 
@@ -66,6 +68,18 @@
       <a-entity gltf-model="#jaula-glb"></a-entity>
     </a-entity>
   </a-scene>
+  </template>
+
+  <script>
+    const frag = document.importNode(document.getElementById('scene-tpl').content, true)
+    if (DESKTOP) {
+      // Webcam, no motion sensors: skip the "open on your phone" page, no SLAM.
+      const scene = frag.querySelector('a-scene')
+      scene.removeAttribute('landing-page')
+      scene.setAttribute('xrweb', 'allowedDevices: any; disableWorldTracking: true')
+    }
+    document.body.appendChild(frag)
+  </script>
 </body>
 
 </html>

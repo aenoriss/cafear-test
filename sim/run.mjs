@@ -27,6 +27,7 @@ const query = opt('query', '?debug')
 const seconds = Number(opt('seconds', 25))
 const remote = opt('remote', null)
 const headed = argv.includes('--headed')
+const desktop = argv.includes('--desktop')  // laptop + webcam; pair with a --landscape feed
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json',
@@ -48,7 +49,7 @@ const serve = () => new Promise((resolve) => {
 })
 
 // Runs in the page before any of its scripts.
-const initScript = () => {
+const initScript = ({desktop}) => {
   const EVENTS = [
     'xrloaded', 'realityready', 'realityerror', 'camerastatuschange',
     'xrimageloading', 'xrimagescanning', 'xrimagefound', 'xrimagelost',
@@ -76,8 +77,8 @@ const initScript = () => {
     return gum(c)
   }
 
-  // A phone held upright and still: gravity along device +Y.
-  setInterval(() => {
+  // A phone held upright and still: gravity along device +Y. Laptops have no IMU.
+  if (!desktop) setInterval(() => {
     window.dispatchEvent(new DeviceMotionEvent('devicemotion', {
       acceleration: {x: 0, y: 0, z: 0},
       accelerationIncludingGravity: {x: 0, y: 9.81, z: 0},
@@ -112,7 +113,10 @@ const main = async () => {
       '--ignore-gpu-blocklist',
     ],
   })
-  const context = await browser.newContext({
+  const context = await browser.newContext(desktop ? {
+    viewport: {width: 640, height: 480},
+    permissions: ['camera'],
+  } : {
     userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 ' +
       '(KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36',
     viewport: {width: 412, height: 549},  // 3:4, same as the feed, so nothing is cropped
@@ -121,7 +125,7 @@ const main = async () => {
     hasTouch: true,
     permissions: ['camera', 'accelerometer', 'gyroscope', 'magnetometer'],
   })
-  await context.addInitScript(initScript)
+  await context.addInitScript(initScript, {desktop})
   const page = await context.newPage()
 
   const lines = []

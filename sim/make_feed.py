@@ -13,7 +13,7 @@ import math
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
-W, H, FPS = 480, 640, 30  # portrait, as a phone held upright delivers it
+FPS = 30
 
 ap = argparse.ArgumentParser()
 ap.add_argument("qr")
@@ -22,7 +22,9 @@ ap.add_argument("--qr-px", type=int, default=160)
 ap.add_argument("--tilt", type=float, default=15)
 ap.add_argument("--seconds", type=float, default=6)
 ap.add_argument("--still", action="store_true", help="no camera motion (matches the still fake IMU)")
+ap.add_argument("--landscape", action="store_true", help="640x480 like a laptop webcam (default: 480x640 phone)")
 args = ap.parse_args()
+W, H = (640, 480) if args.landscape else (480, 640)
 if args.still:
     args.tilt = 0
 
