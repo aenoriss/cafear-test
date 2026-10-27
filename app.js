@@ -31,7 +31,12 @@ const LOCK_AFTER_UPDATES = 45  // accepted QR poses before locking (~1.5 s)
 const CFG = {...CafeConfig.DEFAULTS}
 const cfgReady = CafeConfig.load().then(c => Object.assign(CFG, c))
 
-const TARGET_NAME = 'qr-cafear'
+// Two pictures of the same QR (same URL): the printed one (Python qrcode) and
+// the one 8th Wall's desktop landing page draws (JS qrcode). They pick
+// different mask patterns, 298 of 841 modules apart, so to the image tracker
+// they are different images. qr-cafear-landing.png was generated with
+// qrcode@1.5.4, level M, and checked module-for-module against the page.
+const TARGET_NAMES = ['qr-cafear', 'qr-cafear-landing']
 const SMOOTHING = 0.25
 
 // Always the main (1x) rear camera. 8th Wall asks for facingMode 'environment'
@@ -76,19 +81,19 @@ if (gumOriginal) {
     }
     const track = stream.getVideoTracks()[0]
     const s = track?.getSettings() || {}
-    cameraInfo = `${track?.label || '?'} ${s.width}x${s.height}${mainCameraId ? '' : ' (default)'}`
+    cameraInfo = `${(track?.label || '?').slice(0, 32)} ${s.width}x${s.height}` +
+      (mainCameraId ? '' : ' (default)')
     console.log(`[app] camera: ${cameraInfo}`)
     return stream
   }
 }
 
-let targetData = null
-const enableQr = on => XR8.XrController.configure({imageTargetData: on ? [targetData] : []})
+let targetData = []
+const enableQr = on => XR8.XrController.configure({imageTargetData: on ? targetData : []})
 
-fetch('image-targets/qr-cafear.json')
-  .then(r => r.json())
-  .then((target) => {
-    targetData = target
+Promise.all(TARGET_NAMES.map(n => fetch(`image-targets/${n}.json`).then(r => r.json())))
+  .then((targets) => {
+    targetData = targets
     const configure = () => enableQr(true)
     window.XR8 ? configure() : window.addEventListener('xrloaded', configure)
   })
@@ -114,7 +119,8 @@ AFRAME.registerComponent('cage-model', {
       const m = CafeConfig.measureModel(AFRAME.THREE, model)
       model.position.y -= m.baseY
       this.mixer = CafeConfig.animate(AFRAME.THREE, model, model.animations)
-      console.log(`[app] model ${m.height.toFixed(3)} tall, ${model.animations.length} clip(s)`)
+      console.log(`[app] model ${m.height.toFixed(3)} tall, ${model.animations.length} clip(s), ` +
+        `sequence ${this.mixer.length.toFixed(1)} s`)
       // Placement depends on the measured size.
       this.el.parentEl.components['qr-table-anchor'].place()
     })
@@ -174,7 +180,7 @@ AFRAME.registerComponent('qr-table-anchor', {
 
     this.el.object3D.visible = false
     const onImage = ({detail}) => {
-      if (detail.name === TARGET_NAME) this.updateGoal(detail)
+      if (TARGET_NAMES.includes(detail.name)) this.updateGoal(detail)
     }
     this.el.sceneEl.addEventListener('xrimagefound', onImage)
     this.el.sceneEl.addEventListener('xrimageupdated', onImage)

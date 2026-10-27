@@ -25,10 +25,14 @@ window.CafeConfig = (() => {
   const CAGE_MODEL = {height: 4.035, radius: 1.32, baseY: -0.055}
 
   // Measures a loaded model (skinned parts included) and updates CAGE_MODEL.
+  // The cage itself is the reference when the model has one (a node named
+  // "Jaula..."): props such as the laptop must not change the 7 cm sizing.
   const measureModel = (THREE, object) => {
     object.updateMatrixWorld(true)
+    let ref = object
+    object.traverse((o) => { if (ref === object && /^jaula/i.test(o.name)) ref = o })
     const inv = new THREE.Matrix4().copy(object.matrixWorld).invert()
-    const box = new THREE.Box3().setFromObject(object, true).applyMatrix4(inv)
+    const box = new THREE.Box3().setFromObject(ref, true).applyMatrix4(inv)
     const size = box.getSize(new THREE.Vector3())
     Object.assign(CAGE_MODEL, {height: size.y, radius: Math.max(size.x, size.z) / 2, baseY: box.min.y})
     return CAGE_MODEL
@@ -132,13 +136,32 @@ window.CafeConfig = (() => {
     }
   }
 
-  // Plays every clip in the model on loop (the door opens and closes in 3 s).
-  // Call update(seconds) every frame.
-  const animate = (THREE, object, clips) => {
+  // Plays all clips together as one sequence: they are parts of one storyboard
+  // with different lengths (7-29 s), so looping each on its own would drift
+  // them apart. The sequence ends on its last frame for holdSeconds, then
+  // replays. Call update(seconds) every frame.
+  const animate = (THREE, object, clips, {holdSeconds = 4} = {}) => {
     object.traverse((o) => { if (o.isSkinnedMesh) o.frustumCulled = false })
     const mixer = new THREE.AnimationMixer(object)
-    for (const clip of clips || []) mixer.clipAction(clip).play()
-    return mixer
+    const actions = (clips || []).map((clip) => {
+      const a = mixer.clipAction(clip)
+      a.setLoop(THREE.LoopOnce, 1)
+      a.clampWhenFinished = true
+      return a.play()
+    })
+    const length = Math.max(0, ...(clips || []).map(c => c.duration))
+    let t = 0
+    return {
+      length,
+      update(dt) {
+        t += dt
+        if (t > length + holdSeconds) {
+          t = 0
+          for (const a of actions) a.reset().play()
+        }
+        mixer.update(dt)
+      },
+    }
   }
 
   return {FIELDS, DEFAULTS, CAGE_MODEL, measureModel, animate, load, placeCage, panel}
