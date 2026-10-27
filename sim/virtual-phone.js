@@ -126,24 +126,50 @@
         g.fill()
       }
     })
-    const table = new THREE.Mesh(new THREE.PlaneGeometry(3, 3),
+    // A closed room: x -1.5..1.5, z -0.6..2.4, table top at y = 0 filling it.
+    // With one wall and empty space around it, half the view could be blank
+    // grey; 8th Wall then stopped registering movement (2 cm for a 61 cm move)
+    // and the cage was dragged with the camera.
+    const ROOM = {x0: -1.5, x1: 1.5, z0: -0.6, z1: 2.4, y0: -0.75, y1: 1.75}
+    const table = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.x1 - ROOM.x0, ROOM.z1 - ROOM.z0),
       new THREE.MeshBasicMaterial({map: tableTex}))
     table.rotation.x = -Math.PI / 2
+    table.position.set((ROOM.x0 + ROOM.x1) / 2, 0, (ROOM.z0 + ROOM.z1) / 2)
     scene.add(table)
 
-    // Wall behind, with posters.
-    const wallTex = noiseTexture(2048, 1024, (g, w, h) => {
-      g.fillStyle = '#b9b2a6'
+    // Walls with posters; each call draws a different pattern.
+    const posterTex = (base) => noiseTexture(2048, 1024, (g, w, h) => {
+      g.fillStyle = base
       g.fillRect(0, 0, w, h)
       for (let i = 0; i < 260; i++) {
         g.fillStyle = `hsl(${rnd() * 360},${30 + rnd() * 50}%,${25 + rnd() * 55}%)`
         g.fillRect(rnd() * w, rnd() * h, 10 + rnd() * 140, 10 + rnd() * 140)
       }
     })
-    const wall = new THREE.Mesh(new THREE.PlaneGeometry(4, 2),
-      new THREE.MeshBasicMaterial({map: wallTex}))
-    wall.position.set(0, 1, -0.6)
-    scene.add(wall)
+    const W = ROOM.x1 - ROOM.x0
+    const D = ROOM.z1 - ROOM.z0
+    const H = ROOM.y1 - ROOM.y0
+    const cy = (ROOM.y0 + ROOM.y1) / 2
+    const cx = (ROOM.x0 + ROOM.x1) / 2
+    const cz = (ROOM.z0 + ROOM.z1) / 2
+    const walls = [
+      [W, [cx, cy, ROOM.z0], 0, '#b9b2a6'],            // behind the bag
+      [W, [cx, cy, ROOM.z1], Math.PI, '#a9b4b9'],      // opposite
+      [D, [ROOM.x0, cy, cz], Math.PI / 2, '#b6a9b9'],  // left
+      [D, [ROOM.x1, cy, cz], -Math.PI / 2, '#b9b7a6'], // right
+    ]
+    for (const [width, pos, rotY, base] of walls) {
+      const wall = new THREE.Mesh(new THREE.PlaneGeometry(width, H),
+        new THREE.MeshBasicMaterial({map: posterTex(base)}))
+      wall.position.set(...pos)
+      wall.rotation.y = rotY
+      scene.add(wall)
+    }
+    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W, D),
+      new THREE.MeshBasicMaterial({map: posterTex('#d8d4cc')}))
+    ceiling.rotation.x = Math.PI / 2
+    ceiling.position.set(cx, ROOM.y1, cz)
+    scene.add(ceiling)
 
     // Bag: matte black with a little printed text, sides slightly lighter.
     const frontTex = noiseTexture(512, 768, (g, w, h) => {
@@ -317,6 +343,8 @@
   }
 
   const ready = buildScene().then((canvas) => {
+    // For tests: the ground-truth camera, to compare against the AR camera.
+    window.__vphone = {camera, THREE, free}
     requestAnimationFrame(tick)
     return canvas
   })
