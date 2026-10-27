@@ -40,6 +40,14 @@
       font: 600 15px/1.2 system-ui, sans-serif; color: #fff; white-space: nowrap;
       pointer-events: none;
     }
+    #no-webgl {
+      display: none; max-width: 520px; margin: 15vh auto 0; padding: 0 16px;
+      font: 16px/1.5 system-ui, sans-serif; color: #eee;
+    }
+    #no-webgl h1 { font-size: 20px; line-height: 1.3; }
+    html:has(#no-webgl[style*="block"]), html:has(#no-webgl[style*="block"]) body {
+      background: #1e2125;
+    }
     #edit-panel {
       position: fixed; z-index: 20; left: 8px; right: 8px; top: 8px; display: none;
       max-height: 32vh; overflow-y: auto; padding: 0 12px 10px; border-radius: 12px;
@@ -101,15 +109,41 @@
   </a-scene>
   </template>
 
+  <div id="no-webgl">
+    <h1>Este navegador tiene los gráficos 3D desactivados</h1>
+    <p>La experiencia necesita WebGL. Probá en este orden:</p>
+    <ol>
+      <li>Cerrá todas las ventanas del navegador y volvé a abrirlo.</li>
+      <li>Activá la aceleración por hardware (Chrome: Configuración → Sistema →
+        «Usar la aceleración de gráficos cuando esté disponible») y reiniciá.</li>
+      <li>Abrilo desde el celular escaneando el QR.</li>
+    </ol>
+  </div>
+
   <script>
-    const frag = document.importNode(document.getElementById('scene-tpl').content, true)
-    if (DESKTOP) {
-      // Webcam, no motion sensors: skip the "open on your phone" page, no SLAM.
-      const scene = frag.querySelector('a-scene')
-      scene.removeAttribute('landing-page')
-      scene.setAttribute('xrweb', 'allowedDevices: any; disableWorldTracking: true')
+    // Without WebGL, A-Frame fails to create its renderer and every component
+    // after it throws; say what is wrong instead.
+    const hasWebgl = (() => {
+      try {
+        const c = document.createElement('canvas')
+        return !!(c.getContext('webgl2') || c.getContext('webgl'))
+      } catch (e) {
+        return false
+      }
+    })()
+    if (!hasWebgl) {
+      document.getElementById('no-webgl').style.display = 'block'
+      console.warn('[app] WebGL unavailable; scene not started')
+    } else {
+      const frag = document.importNode(document.getElementById('scene-tpl').content, true)
+      if (DESKTOP) {
+        // Webcam, no motion sensors: skip the "open on your phone" page, no SLAM.
+        const scene = frag.querySelector('a-scene')
+        scene.removeAttribute('landing-page')
+        scene.setAttribute('xrweb', 'allowedDevices: any; disableWorldTracking: true')
+      }
+      document.body.appendChild(frag)
     }
-    document.body.appendChild(frag)
   </script>
 </body>
 
