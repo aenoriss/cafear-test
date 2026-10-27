@@ -137,8 +137,12 @@
 
     const cage = new THREE.Group()
     scene.add(cage)
+    let mixer = null
     new GLTFLoader().load('assets/jaula.glb', (gltf) => {
       cage.add(gltf.scene)
+      const m = CafeConfig.measureModel(THREE, gltf.scene)
+      gltf.scene.position.y -= m.baseY
+      mixer = CafeConfig.animate(THREE, gltf.scene, gltf.animations)
       update()
     })
 
@@ -225,7 +229,9 @@
     }
     new ResizeObserver(resize).observe(view)
     resize()
+    const clock = new THREE.Clock()
     renderer.setAnimationLoop(() => {
+      mixer?.update(clock.getDelta())
       controls.update()
       renderer.render(scene, camera)
     })

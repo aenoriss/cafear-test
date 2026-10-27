@@ -19,8 +19,20 @@ window.CafeConfig = (() => {
     cageCm: 7, gapCm: 1, xCm: 0, rotDeg: 0, qrCm: 6, qrHeightCm: 10,
     bagWCm: 16, bagHCm: 24, bagDCm: 8,
   }
-  // jaula.glb's bounds, in metres.
-  const CAGE_MODEL = {height: 0.364, radius: 0.12}
+  // jaula.glb's bounds in its own units, so cageCm stays true whatever scale the
+  // modeler exports at. Defaults are the current file's; measureModel() replaces
+  // them once the .glb has loaded.
+  const CAGE_MODEL = {height: 4.035, radius: 1.32, baseY: -0.055}
+
+  // Measures a loaded model (skinned parts included) and updates CAGE_MODEL.
+  const measureModel = (THREE, object) => {
+    object.updateMatrixWorld(true)
+    const inv = new THREE.Matrix4().copy(object.matrixWorld).invert()
+    const box = new THREE.Box3().setFromObject(object, true).applyMatrix4(inv)
+    const size = box.getSize(new THREE.Vector3())
+    Object.assign(CAGE_MODEL, {height: size.y, radius: Math.max(size.x, size.z) / 2, baseY: box.min.y})
+    return CAGE_MODEL
+  }
 
   const load = async () => {
     let file = {}
@@ -120,5 +132,14 @@ window.CafeConfig = (() => {
     }
   }
 
-  return {FIELDS, DEFAULTS, CAGE_MODEL, load, placeCage, panel}
+  // Plays every clip in the model on loop (the door opens and closes in 3 s).
+  // Call update(seconds) every frame.
+  const animate = (THREE, object, clips) => {
+    object.traverse((o) => { if (o.isSkinnedMesh) o.frustumCulled = false })
+    const mixer = new THREE.AnimationMixer(object)
+    for (const clip of clips || []) mixer.clipAction(clip).play()
+    return mixer
+  }
+
+  return {FIELDS, DEFAULTS, CAGE_MODEL, measureModel, animate, load, placeCage, panel}
 })()

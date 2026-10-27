@@ -21,6 +21,8 @@ const DEBUG = params.has('debug')
 const EDIT = params.has('edit')
 const USE_FLOOR = !DESKTOP && params.get('floor') !== '0'
 const KEEP_TRACKING = params.has('track')
+const ANIM_DELAY_MS = (Number.isFinite(parseFloat(params.get('animDelay')))
+  ? parseFloat(params.get('animDelay')) : 3) * 1000
 // Phones are DPR 2-3. Rendering at that density starved QR detection on a 4x
 // CPU-throttled sim (never found in 2 of 3 runs, vs 2.3 s at DPR 1). ?dpr= overrides.
 const MAX_PIXEL_RATIO = parseFloat(params.get('dpr')) || 1.5
@@ -52,6 +54,34 @@ AFRAME.registerComponent('env-map', {
       tex.colorSpace = THREE.SRGBColorSpace
       this.el.object3D.environment = tex
     })
+  },
+})
+
+// On the gltf-model entity: measure the model (its units are whatever the
+// modeler exported), stand its base on the table, and loop its animations.
+AFRAME.registerComponent('cage-model', {
+  init() {
+    this.el.addEventListener('model-loaded', () => {
+      const model = this.el.getObject3D('mesh')
+      const m = CafeConfig.measureModel(AFRAME.THREE, model)
+      model.position.y -= m.baseY
+      this.mixer = CafeConfig.animate(AFRAME.THREE, model, model.animations)
+      console.log(`[app] model ${m.height.toFixed(3)} tall, ${model.animations.length} clip(s)`)
+      // Placement depends on the measured size.
+      this.el.parentEl.components['qr-table-anchor'].place()
+    })
+  },
+  // The first seconds after placement are the busiest (QR detection, locking,
+  // first render of the model), so the animation waits ?animDelay= s (default 3).
+  tick(time, dt) {
+    if (!this.mixer || !this.el.object3D.parent.visible) return
+    if (this.shownAt === undefined) this.shownAt = time
+    if (time - this.shownAt < ANIM_DELAY_MS) return
+    if (!this.started) {
+      this.started = true
+      console.log(`[app] animation started, ${((time - this.shownAt) / 1000).toFixed(1)} s after the cage appeared`)
+    }
+    this.mixer.update(dt / 1000)
   },
 })
 

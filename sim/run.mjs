@@ -430,6 +430,11 @@ const main = async () => {
       cagePos: o && [o.position.x, o.position.y, o.position.z].map(v => +v.toFixed(3)),
       cageScale: o && +o.scale.x.toFixed(3),
       bodyText: document.body.innerText.slice(0, 300),
+      // Any animated door: its rotation, sampled twice to show whether it moves.
+      door: (() => {
+        const d = document.querySelector('a-scene').object3D.getObjectByName('Puerta')
+        return d && d.quaternion.toArray().map(v => +v.toFixed(3))
+      })(),
       videos: [...document.querySelectorAll('video')].map(v => ({
         readyState: v.readyState, w: v.videoWidth, h: v.videoHeight, paused: v.paused,
         muted: v.muted, autoplay: v.autoplay, connected: v.isConnected,
