@@ -198,7 +198,10 @@ AFRAME.registerComponent('qr-table-anchor', {
 
     // Once placement has settled, SLAM alone holds the cage in place, so stop
     // the engine searching for the QR in every frame (?track keeps it on).
-    if (!KEEP_TRACKING && !DESKTOP && ++this.accepted === LOCK_AFTER_UPDATES) {
+    // Not when SLAM started badly (implausible floor): its scale is then off
+    // too, and a cage held by SLAM alone slides as the phone moves.
+    if (!KEEP_TRACKING && !DESKTOP && !(USE_FLOOR && this.floorOk === false) &&
+        ++this.accepted === LOCK_AFTER_UPDATES) {
       enableQr(false)
       this.locked = true
       console.log('[app] cage locked; QR recognition off')
@@ -210,10 +213,21 @@ AFRAME.registerComponent('qr-table-anchor', {
     if (!this.last) return
     const {center, q, qrSideWorld, d} = this.last
     const k = qrSideWorld / (CFG.qrCm / 100)
-    // 8th Wall's SLAM keeps a ground plane at y = 0, recomputed from stable
-    // feature points; on a tabletop that is the table.
+    // 8th Wall's SLAM keeps a ground plane at y = 0; on a tabletop that is the
+    // table. But it is guessed from what the camera saw at start: started close
+    // to the bag (only its front in view) it put the QR 1.4 cm above the "floor"
+    // instead of 10 (sim, 2 of 2 runs). So trust it only when it agrees with the
+    // bag's configured QR height within 50-150%; otherwise use that height.
+    const qrAboveFloor = center.y / k * 100
+    const floorOk = USE_FLOOR &&
+      qrAboveFloor > CFG.qrHeightCm * 0.5 && qrAboveFloor < CFG.qrHeightCm * 1.5
+    if (floorOk !== this.floorOk) {
+      this.floorOk = floorOk
+      console.log(`[app] QR ${qrAboveFloor.toFixed(1)} cm above 8th Wall floor: ` +
+        (floorOk ? 'using that floor' : `implausible, using qrHeightCm ${CFG.qrHeightCm}`))
+    }
     const pose = CafeConfig.placeCage(AFRAME.THREE, {
-      center, normal: this.normal, up: this.up, k, floorY: USE_FLOOR ? 0 : null,
+      center, normal: this.normal, up: this.up, k, floorY: floorOk ? 0 : null,
     }, CFG, {onQr: DESKTOP})
     this.goalPos.copy(pose.position)
     this.goalQuat.copy(pose.quaternion)
@@ -241,8 +255,8 @@ AFRAME.registerComponent('qr-table-anchor', {
         `scale ${d.scale.toFixed(3)}  sw ${(d.scaledWidth || 0).toFixed(3)}  ` +
         `sh ${(d.scaledHeight || 0).toFixed(3)}\nk ${k.toFixed(3)}  ` +
         `tilt ${(Math.asin(Math.min(1, Math.abs(new THREE.Vector3(0, 0, 1).applyQuaternion(q).y))) * 57.3).toFixed(1)}°\n` +
-        `QR above 8th Wall floor: ${(center.y / k * 100).toFixed(1)} cm` +
-        ` (${USE_FLOOR ? 'cage on floor' : `using ${CFG.qrHeightCm} cm`})`
+        `QR above 8th Wall floor: ${qrAboveFloor.toFixed(1)} cm` +
+        ` (${floorOk ? 'cage on floor' : `using ${CFG.qrHeightCm} cm`})`
     }
   },
 

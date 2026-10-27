@@ -4,6 +4,7 @@
 // (table, wall, bag, the 6 cm QR 10 cm up the bag) seen by a phone camera that
 // follows a scripted scan, and fires devicemotion/deviceorientation events
 // computed from that same camera path, so 8th Wall's SLAM sees a consistent phone.
+// With window.__VPHONE__ = {free: true} (run.mjs --free) you drive it instead.
 (() => {
   const CFG = Object.assign({
     qrPath: 'image-targets/qr-cafear_original.png',
@@ -187,32 +188,106 @@
     0, 1, 0, 0,
     0, 0, 0, 1)
 
+  // Free roam (run.mjs --free): keyboard and mouse drive the phone instead of
+  // the script. Velocity eases towards the keys' target, so motion stays smooth
+  // enough for SLAM, and the IMU events below come from that same motion.
+  //   W/S forward/back  A/D left/right  R/F up/down  arrows or drag: look
+  //   Shift: faster     Alt: slower     Home: back to the start pose
+  // 15 cm in front of the QR: close enough for 8th Wall to detect it.
+  const FREE_START = CFG.start || {pos: [0, 0.11, 0.19], yaw: 0, pitch: -0.07}
+  const free = CFG.free ? {
+    keys: new Set(), drag: null,
+    pos: [...FREE_START.pos], yaw: FREE_START.yaw, pitch: FREE_START.pitch,
+    vel: [0, 0, 0], prevVel: [0, 0, 0],
+  } : null
+  if (free) {
+    const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyR', 'KeyF',
+      'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'AltLeft', 'Home']
+    window.addEventListener('keydown', (e) => {
+      if (!MOVE_KEYS.includes(e.code)) return
+      e.preventDefault()
+      if (e.code === 'Home') Object.assign(free, {pos: [...FREE_START.pos], yaw: FREE_START.yaw, pitch: FREE_START.pitch})
+      free.keys.add(e.code)
+    }, true)
+    window.addEventListener('keyup', e => free.keys.delete(e.code), true)
+    window.addEventListener('blur', () => free.keys.clear())
+    // Pointer events cover both mouse and the emulated touch. A press that
+    // doesn't move still reaches the page, so the record button works.
+    window.addEventListener('pointerdown', (e) => { free.drag = [e.clientX, e.clientY] }, true)
+    window.addEventListener('pointerup', () => { free.drag = null }, true)
+    window.addEventListener('pointermove', (e) => {
+      if (!free.drag) return
+      free.yaw -= (e.clientX - free.drag[0]) * 0.005
+      free.pitch -= (e.clientY - free.drag[1]) * 0.005
+      free.drag = [e.clientX, e.clientY]
+    }, true)
+  }
+
+  const stepFree = (dt) => {
+    const k = free.keys
+    const on = c => (k.has(c) ? 1 : 0)
+    const turn = 1.2 * dt  // rad/s with the arrow keys
+    free.yaw += (on('ArrowLeft') - on('ArrowRight')) * turn
+    free.pitch += (on('ArrowUp') - on('ArrowDown')) * turn
+    free.pitch = Math.max(-1.45, Math.min(1.45, free.pitch))
+
+    const speed = (k.has('ShiftLeft') || k.has('ShiftRight')) ? 0.6 : k.has('AltLeft') ? 0.05 : 0.2
+    const f = on('KeyW') - on('KeyS')
+    const r = on('KeyD') - on('KeyA')
+    const u = on('KeyR') - on('KeyF')
+    const sy = Math.sin(free.yaw)
+    const cy = Math.cos(free.yaw)
+    const target = [(-sy * f + cy * r) * speed, u * speed, (-cy * f - sy * r) * speed]
+    const ease = 1 - Math.exp(-dt * 6)
+    free.prevVel = [...free.vel]
+    free.vel = free.vel.map((v, i) => v + (target[i] - v) * ease)
+    free.pos = free.pos.map((p, i) => p + free.vel[i] * dt)
+    free.pos[1] = Math.max(0.01, free.pos[1])  // not through the table
+    return {
+      pos: new THREE.Vector3(...free.pos),
+      quat: new THREE.Quaternion().setFromEuler(new THREE.Euler(free.pitch, free.yaw, 0, 'YXZ')),
+      accel: new THREE.Vector3(...free.vel.map((v, i) => (v - free.prevVel[i]) / dt)),
+    }
+  }
+
   let pathT = 0
   const tick = (now) => {
     requestAnimationFrame(tick)
     const t = tStart === null ? 0 : (now - tStart) / 1000
-    const waiting = pathT >= HOLD_UNTIL_FOUND && !qrFound
-    if (tStart !== null && prevNow !== null && !waiting) pathT += (now - prevNow) / 1000
-    const pose = poseAt(pathT, t)
+    const dt = prevNow === null ? 1 / 60 : Math.max((now - prevNow) / 1000, 1e-3)
+    let pose
+    let a
+    if (free) {
+      pose = stepFree(Math.min(dt, 0.1))
+      a = pose.accel
+      if (labelEl) {
+        const cm = v => (v * 100).toFixed(0)
+        labelEl.textContent = `libre · ${cm(free.pos[0])}, ${cm(free.pos[1])}, ${cm(free.pos[2])} cm · ` +
+          'WASD mover · R/F subir/bajar · arrastrar o flechas mirar · Shift rápido · Alt lento · Home inicio'
+      }
+    } else {
+      const waiting = pathT >= HOLD_UNTIL_FOUND && !qrFound
+      if (tStart !== null && prevNow !== null && !waiting) pathT += (now - prevNow) / 1000
+      pose = poseAt(pathT, t)
+      if (labelEl) {
+        labelEl.textContent = `virtual phone ${t.toFixed(1)}s · ` +
+          (waiting ? 'esperando que detecte el QR' : pose.label)
+      }
+      // Device frame == camera frame (x right, y up, z out of the screen).
+      const h = 1 / 120
+      const adv = waiting ? 0 : h  // the path is paused while waiting; shake isn't
+      a = poseAt(pathT + adv, t + h).pos.add(poseAt(pathT - adv, t - h).pos)
+        .addScaledVector(pose.pos, -2)
+        .multiplyScalar(1 / (h * h))
+    }
     camera.position.copy(pose.pos)
     camera.quaternion.copy(pose.quat)
     renderer.render(scene, camera)
-    if (labelEl) {
-      labelEl.textContent = `virtual phone ${t.toFixed(1)}s · ` +
-        (waiting ? 'esperando que detecte el QR' : pose.label)
-    }
 
-    // Device frame == camera frame (x right, y up, z out of the screen).
-    const h = 1 / 120
-    const adv = waiting ? 0 : h  // the path is paused while waiting; shake isn't
-    const a = poseAt(pathT + adv, t + h).pos.add(poseAt(pathT - adv, t - h).pos)
-      .addScaledVector(pose.pos, -2)
-      .multiplyScalar(1 / (h * h))
     const inv = pose.quat.clone().invert()
     const accel = a.clone().applyQuaternion(inv)
     const accelG = a.clone().add(new THREE.Vector3(0, 9.81, 0)).applyQuaternion(inv)
 
-    const dt = prevNow === null ? 1 / 60 : Math.max((now - prevNow) / 1000, 1e-3)
     const rate = {alpha: 0, beta: 0, gamma: 0}
     if (prevQuat) {
       const dq = prevQuat.clone().invert().multiply(pose.quat)
@@ -255,7 +330,7 @@
 
   window.addEventListener('DOMContentLoaded', () => {
     labelEl = document.createElement('div')
-    labelEl.style.cssText = 'position:fixed;top:6px;left:6px;z-index:99;font:12px monospace;' +
+    labelEl.style.cssText = 'position:fixed;top:6px;left:6px;right:6px;z-index:99;font:11px monospace;' +
       'color:#ff0;background:rgba(0,0,0,.6);padding:3px 6px;pointer-events:none'
     document.body.appendChild(labelEl)
   })

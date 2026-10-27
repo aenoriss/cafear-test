@@ -5,6 +5,8 @@
 // records every 8th Wall event plus periodic screenshots.
 //
 // Usage: node run.mjs [--feed out/feed.y4m] [--query "?debug"] [--seconds 25]
+//                     [--free]                 virtual phone you drive with keyboard and
+//                                              mouse (WASD, R/F, drag); window stays open
 //                     [--virtual]              camera = virtual phone in a 3D scene
 //                                              (virtual-phone.js), with matching IMU
 //                     [--shot-every 5]         seconds between screenshots
@@ -34,12 +36,13 @@ const opt = (name, fallback) => {
 }
 const feed = path.resolve(here, opt('feed', 'out/feed.y4m'))
 const query = opt('query', '?debug')
-const seconds = Number(opt('seconds', 25))
+const free = argv.includes('--free')  // drive the virtual phone yourself; implies --virtual --headed
+const seconds = Number(opt('seconds', free ? 3600 : 25))
 const remote = opt('remote', null)
-const headed = argv.includes('--headed')
+const headed = free || argv.includes('--headed')
 const desktop = argv.includes('--desktop')  // laptop + webcam; pair with a --landscape feed
-const virtual = argv.includes('--virtual')
-const shotEvery = Number(opt('shot-every', 5))
+const virtual = free || argv.includes('--virtual')
+const shotEvery = Number(opt('shot-every', free ? 3600 : 5))
 const recordAt = opt('record', null)  // seconds in: tap record, 5 s later tap stop
 const profileAt = opt('profile', null)
 const dpr = Number(opt('dpr', 1))
@@ -281,6 +284,7 @@ const main = async () => {
   })
   await context.addInitScript(initScript, {desktop, virtual, headed})
   if (virtual) {
+    if (free) await context.addInitScript(() => { window.__VPHONE__ = {free: true} })
     await context.addInitScript({path: path.join(here, 'virtual-phone.js')})
   }
   const page = await context.newPage()
