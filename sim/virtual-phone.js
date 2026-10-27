@@ -25,8 +25,9 @@
   const KEYS = [
     [0, [0.05, 0.28, 0.70], [0, 0.12, 0], 'lejos: el QR es chico'],
     [3, [0.05, 0.28, 0.70], [0, 0.12, 0], 'lejos: el QR es chico'],
-    [7, [0.00, 0.12, 0.20], QR, 'acercando'],
-    [11, [0.00, 0.12, 0.20], QR, 'escaneando de cerca'],
+    // Scan distance grows with the QR, so it fills the same part of the frame.
+    [7, [0.00, 0.12, QR_Z + 0.16 * CFG.qrSide / 0.06], QR, 'acercando'],
+    [11, [0.00, 0.12, QR_Z + 0.16 * CFG.qrSide / 0.06], QR, 'escaneando de cerca'],
     [16, [0.06, 0.26, 0.45], FRAME, 'alejándose'],
     [22, [-0.20, 0.24, 0.40], FRAME, 'rodeando'],
     [28, [0.26, 0.22, 0.38], FRAME, 'rodeando'],
@@ -40,6 +41,25 @@
   const onFound = () => { qrFound = true }
   window.addEventListener('xrimagefound', onFound, true)
   document.addEventListener('xrimagefound', onFound, true)
+
+  // Like a user following 8th Wall's coaching overlay ("move the phone forward
+  // and back"): while it shows, push 8 cm along the view direction and back,
+  // fading in and out over half a second.
+  const coach = {shownAt: null, hiddenAt: null}
+  const onCoach = show => () => {
+    const now = performance.now() / 1000
+    if (show && coach.shownAt === null) Object.assign(coach, {shownAt: now, hiddenAt: null})
+    if (!show && coach.shownAt !== null && coach.hiddenAt === null) coach.hiddenAt = now
+  }
+  document.addEventListener('coaching-overlay.show', onCoach(true), true)
+  document.addEventListener('coaching-overlay.hide', onCoach(false), true)
+  const coachOffset = (ts) => {
+    if (coach.shownAt === null || tStart === null) return 0
+    const t = ts + tStart / 1000  // ts is seconds since the stream started
+    const fadeIn = Math.min(1, Math.max(0, (t - coach.shownAt) / 0.5))
+    const fadeOut = coach.hiddenAt === null ? 1 : Math.max(0, 1 - (t - coach.hiddenAt) / 0.5)
+    return 0.08 * Math.sin(2 * Math.PI * 0.5 * (t - coach.shownAt)) * fadeIn * fadeOut
+  }
 
   const ease = u => 0.5 - 0.5 * Math.cos(Math.PI * u)
   const lerp3 = (a, b, u) => a.map((v, i) => v + (b[i] - v) * u)
@@ -63,10 +83,15 @@
     const [t1, p1, l1] = KEYS[i + 1]
     const u = t1 > t0 ? ease((t - t0) / (t1 - t0)) : 0
     const sh = shake(ts)
+    const pos = lerp3(p0, p1, u)
+    const look = lerp3(l0, l1, u)
+    const dir = look.map((v, k) => v - pos[k])
+    const len = Math.hypot(...dir) || 1
+    const c = coachOffset(ts)
     return {
-      pos: lerp3(p0, p1, u).map((v, k) => v + sh.pos[k]),
-      look: lerp3(l0, l1, u).map((v, k) => v + sh.look[k]),
-      label: label0,
+      pos: pos.map((v, k) => v + sh.pos[k] + dir[k] / len * c),
+      look: look.map((v, k) => v + sh.look[k] + dir[k] / len * c),
+      label: c ? 'adelante y atrás (coaching)' : label0,
     }
   }
 

@@ -16,6 +16,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1/dist/xr.js" async crossorigin="anonymous" data-preload-chunks="slam"></script>
   <script src="https://cdn.jsdelivr.net/npm/@8thwall/landing-page@1/dist/landing-page.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@8thwall/xrextras@1/dist/xrextras.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@8thwall/coaching-overlay@1.0.0/dist/coaching-overlay.js" crossorigin="anonymous"></script>
   <script src="./config.js"></script>
   <script src="./app.js"></script>
 
@@ -136,11 +137,19 @@
       console.warn('[app] WebGL unavailable; scene not started')
     } else {
       const frag = document.importNode(document.getElementById('scene-tpl').content, true)
+      const scene = frag.querySelector('a-scene')
       if (DESKTOP) {
         // Webcam, no motion sensors: skip the "open on your phone" page, no SLAM.
-        const scene = frag.querySelector('a-scene')
         scene.removeAttribute('landing-page')
         scene.setAttribute('xrweb', 'allowedDevices: any; disableWorldTracking: true')
+      } else if (ABSOLUTE_SCALE) {
+        // World in real metres (camera + motion sensors), so sizes don't
+        // depend on how big the QR is printed. Needs a forward/back move with
+        // some of the room in view: from 16 cm, the bag filling the frame,
+        // scale was ready in 1 of 3 sim runs; from 32 cm, in 3 of 3.
+        scene.setAttribute('xrweb', 'scale: absolute')
+        scene.setAttribute('coaching-overlay', 'animationColor: #2ee6a6; ' +
+          'promptText: Alejate un poco y mové el celular hacia adelante y hacia atrás')
       }
       document.body.appendChild(frag)
     }

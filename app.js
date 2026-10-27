@@ -20,6 +20,10 @@ const DESKTOP = params.has('desktop')
 const DEBUG = params.has('debug')
 const EDIT = params.has('edit')
 const USE_FLOOR = !DESKTOP && params.get('floor') !== '0'
+// Real-metre world (8th Wall absolute scale): the cage is cageCm whatever size
+// the QR is printed or shown at. ?scale=responsive goes back to sizing from
+// the QR, assuming it is printed at qrCm.
+const ABSOLUTE_SCALE = !DESKTOP && params.get('scale') !== 'responsive'
 const KEEP_TRACKING = params.has('track')
 const ANIM_DELAY_MS = (Number.isFinite(parseFloat(params.get('animDelay')))
   ? parseFloat(params.get('animDelay')) : 3) * 1000
@@ -171,6 +175,10 @@ AFRAME.registerComponent('qr-table-anchor', {
     this.last = null  // last accepted QR frame, to re-place when settings change
     this.accepted = 0
     this.locked = false
+    // In absolute mode the scale is known only after the user has moved the
+    // phone forward and back (8th Wall's coaching overlay asks for it).
+    this.scaleReady = !ABSOLUTE_SCALE
+    this.coaching = false
     this.hud = document.getElementById('hud')
 
     // Detection needs the QR to fill ≥ ~25% of the frame width (measured in sim/).
@@ -187,12 +195,31 @@ AFRAME.registerComponent('qr-table-anchor', {
 
     // If SLAM loses the world, the cage's anchor can't be trusted: switch QR
     // recognition back on and re-place it from the next scan.
-    this.el.sceneEl.addEventListener('xrtrackingstatus', ({detail}) => {
-      if (!this.locked || detail.status === 'NORMAL') return
+    const unlock = (why) => {
+      if (!this.locked) return
       this.locked = false
       this.accepted = 0
       enableQr(true)
-      console.log(`[app] tracking ${detail.status} (${detail.reason}); QR recognition back on`)
+      console.log(`[app] ${why}; QR recognition back on`)
+    }
+    this.el.sceneEl.addEventListener('xrtrackingstatus', ({detail}) => {
+      if (detail.status !== 'NORMAL') unlock(`tracking ${detail.status} (${detail.reason})`)
+    })
+
+    // 8th Wall's overlay shows while it is still measuring real scale.
+    this.el.sceneEl.addEventListener('coaching-overlay.show', () => {
+      this.coaching = true
+      this.scaleReady = false
+      this.banner.style.display = 'none'
+      unlock('scale lost')
+      console.log('[app] measuring real scale (coaching overlay shown)')
+    })
+    this.el.sceneEl.addEventListener('coaching-overlay.hide', () => {
+      this.coaching = false
+      this.scaleReady = true
+      if (!this.placed) this.banner.style.display = 'block'
+      console.log('[app] real scale ready')
+      this.place()
     })
 
     cfgReady.then(() => {
@@ -254,7 +281,8 @@ AFRAME.registerComponent('qr-table-anchor', {
     // the engine searching for the QR in every frame (?track keeps it on).
     // Not when SLAM started badly (implausible floor): its scale is then off
     // too, and a cage held by SLAM alone slides as the phone moves.
-    if (!KEEP_TRACKING && !DESKTOP && !(USE_FLOOR && this.floorOk === false) &&
+    // In absolute mode, not before real scale is known either.
+    if (!KEEP_TRACKING && !DESKTOP && this.scaleReady && !(USE_FLOOR && this.floorOk === false) &&
         ++this.accepted === LOCK_AFTER_UPDATES) {
       enableQr(false)
       this.locked = true
@@ -266,7 +294,12 @@ AFRAME.registerComponent('qr-table-anchor', {
   place() {
     if (!this.last) return
     const {center, q, qrSideWorld, d} = this.last
-    const k = qrSideWorld / (CFG.qrCm / 100)
+    // World units per metre. With real scale known it is 1 and the QR's size
+    // doesn't matter; until then (or in responsive mode) it comes from the
+    // QR, assuming it is qrCm wide.
+    const metric = ABSOLUTE_SCALE && this.scaleReady
+    const k = metric ? 1 : qrSideWorld / (CFG.qrCm / 100)
+    this.qrMeasuredCm = metric ? qrSideWorld * 100 : null
     // 8th Wall's SLAM keeps a ground plane at y = 0; on a tabletop that is the
     // table. But it is guessed from what the camera saw at start: started close
     // to the bag (only its front in view) it put the QR 1.4 cm above the "floor"
@@ -310,7 +343,10 @@ AFRAME.registerComponent('qr-table-anchor', {
         `sh ${(d.scaledHeight || 0).toFixed(3)}\nk ${k.toFixed(3)}  ` +
         `tilt ${(Math.asin(Math.min(1, Math.abs(new THREE.Vector3(0, 0, 1).applyQuaternion(q).y))) * 57.3).toFixed(1)}°\n` +
         `QR above 8th Wall floor: ${qrAboveFloor.toFixed(1)} cm` +
-        ` (${floorOk ? 'cage on floor' : `using ${CFG.qrHeightCm} cm`})`
+        ` (${floorOk ? 'cage on floor' : `using ${CFG.qrHeightCm} cm`})\n` +
+        (metric ? `scale: real metres · QR measures ${this.qrMeasuredCm.toFixed(1)} cm`
+          : ABSOLUTE_SCALE ? `scale: measuring… (assuming QR ${CFG.qrCm} cm)`
+            : `scale: from QR (assumed ${CFG.qrCm} cm)`)
     }
   },
 
@@ -355,7 +391,7 @@ AFRAME.registerComponent('qr-table-anchor', {
     if (p.z > 1) { x = -x; y = -y }  // behind the camera
     const onScreen = p.z < 1 && Math.abs(x) < 0.9 && Math.abs(y) < 0.9
     hint.style.display = onScreen ? 'none' : 'block'
-    this.banner.style.display = hint.style.display
+    this.banner.style.display = this.coaching ? 'none' : hint.style.display
     if (onScreen) return
     const m = Math.max(Math.abs(x), Math.abs(y))
     const ex = x / m * 0.8
