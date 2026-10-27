@@ -34,6 +34,54 @@ const cfgReady = CafeConfig.load().then(c => Object.assign(CFG, c))
 const TARGET_NAME = 'qr-cafear'
 const SMOOTHING = 0.25
 
+// Always the main (1x) rear camera. 8th Wall asks for facingMode 'environment'
+// and only sometimes picks a device itself: on Android with >2 cameras it
+// prefers 'camera2 0, facing back'; on iOS 16.4+ the device labelled exactly
+// 'Back Camera', else the 2nd device in the list. iOS labels are localized, so
+// on a Spanish iPhone that lookup misses, and the fallback can be the
+// multi-lens camera, which switches to ultra-wide up close (QR distance).
+// Labels are readable only after permission, so the first rear stream is
+// checked once it opens and reopened on the main camera if it isn't.
+const MAIN_CAMERA_LABELS = ['back camera', 'cámara trasera', 'câmera traseira', 'câmara traseira']
+const pickMainCamera = (devices) => {
+  const video = devices.filter(d => d.kind === 'videoinput' && d.label)
+  const android = video
+    .map(d => [d, /camera2 (\d+), facing back/i.exec(d.label)])
+    .filter(([, m]) => m)
+    .sort((a, b) => a[1][1] - b[1][1])
+  if (android.length) return android[0][0]
+  return video.find(d => MAIN_CAMERA_LABELS.includes(d.label.trim().toLowerCase())) || null
+}
+let mainCameraId = null
+let cameraInfo = ''
+const gumOriginal = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices)
+if (gumOriginal) {
+  navigator.mediaDevices.getUserMedia = async (constraints) => {
+    const video = constraints && constraints.video
+    const wantsRear = typeof video === 'object' &&
+      JSON.stringify(video.facingMode || '').includes('environment')
+    if (!wantsRear) return gumOriginal(constraints)
+    const onDevice = id => ({...constraints, video: {...video, deviceId: {exact: id}}})
+
+    let stream = await gumOriginal(mainCameraId ? onDevice(mainCameraId) : constraints)
+    if (!mainCameraId) {
+      const main = pickMainCamera(await navigator.mediaDevices.enumerateDevices())
+      if (main) {
+        mainCameraId = main.deviceId
+        if (stream.getVideoTracks()[0]?.getSettings().deviceId !== main.deviceId) {
+          stream.getTracks().forEach(t => t.stop())
+          stream = await gumOriginal(onDevice(main.deviceId))
+        }
+      }
+    }
+    const track = stream.getVideoTracks()[0]
+    const s = track?.getSettings() || {}
+    cameraInfo = `${track?.label || '?'} ${s.width}x${s.height}${mainCameraId ? '' : ' (default)'}`
+    console.log(`[app] camera: ${cameraInfo}`)
+    return stream
+  }
+}
+
 let targetData = null
 const enableQr = on => XR8.XrController.configure({imageTargetData: on ? [targetData] : []})
 
@@ -271,7 +319,7 @@ AFRAME.registerComponent('qr-table-anchor', {
         this.hudAt = time
         const pr = this.el.sceneEl.renderer.getPixelRatio()
         this.perfLine = `${(1000 / this.frameMs).toFixed(0)} fps (${this.frameMs.toFixed(0)} ms)` +
-          ` · DPR ${pr}${DESKTOP ? ' · no SLAM' : ''}`
+          ` · DPR ${pr}${DESKTOP ? ' · no SLAM' : ''}\ncam ${cameraInfo}`
         if (!this.placed) this.hud.textContent = this.perfLine
       }
     }
