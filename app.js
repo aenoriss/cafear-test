@@ -35,12 +35,11 @@ const LOCK_AFTER_UPDATES = 45  // accepted QR poses before locking (~1.5 s)
 const CFG = {...CafeConfig.DEFAULTS}
 const cfgReady = CafeConfig.load().then(c => Object.assign(CFG, c))
 
-// Two pictures of the same QR (same URL): the printed one (Python qrcode) and
-// the one 8th Wall's desktop landing page draws (JS qrcode). They pick
-// different mask patterns, 298 of 841 modules apart, so to the image tracker
-// they are different images. qr-cafear-landing.png was generated with
-// qrcode@1.5.4, level M, and checked module-for-module against the page.
-const TARGET_NAMES = ['qr-cafear', 'qr-cafear-landing']
+// One target covers both the printed QR (Python qrcode) and the one 8th Wall's
+// desktop landing page draws (JS qrcode@1.5.4, level M): for this URL both
+// libraries pick the same mask, 0 of 841 modules apart. A longer URL can make
+// them differ; then each needs its own target.
+const TARGET_NAMES = ['qr-cafear']
 const SMOOTHING = 0.25
 
 // Always the main (1x) rear camera. 8th Wall asks for facingMode 'environment'
