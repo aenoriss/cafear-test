@@ -3,3 +3,4 @@ tools/
 editor.html
 config.json.bak
 .nojekyll
+.env*

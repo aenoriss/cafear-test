@@ -1,2 +1,5 @@
 sim/node_modules/
 sim/out/
+
+.vercel
+.env*
