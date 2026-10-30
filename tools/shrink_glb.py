@@ -4,8 +4,12 @@ A 7 cm cage covers ~150 px on a phone screen, so 2K textures cost GPU memory
 (22 MB each, decoded) for detail nobody sees.
 
 Usage: python shrink_glb.py <in.glb> <out.glb> [--max 512] [--quality 85]
+                             [--remap MATERIAL_REGEX DARK_HEX LIGHT_HEX]...
+--remap recolours the base-colour texture of matching materials by brightness,
+black -> DARK, white -> LIGHT (e.g. grey baked feathers to the bird's browns).
 Needs: Pillow.
 """
+import re
 import argparse
 import io
 import json
@@ -18,6 +22,7 @@ ap.add_argument("src")
 ap.add_argument("dst")
 ap.add_argument("--max", type=int, default=512)
 ap.add_argument("--quality", type=int, default=85)
+ap.add_argument("--remap", nargs=3, action="append", default=[], metavar=("MATERIAL_REGEX", "DARK", "LIGHT"))
 args = ap.parse_args()
 
 data = open(args.src, "rb").read()
@@ -40,6 +45,27 @@ def view_bytes(v):
     return bin_chunk[v.get("byteOffset", 0): v.get("byteOffset", 0) + v["byteLength"]]
 
 
+def hex_rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+# image index -> (dark, light, material name)
+remaps = {}
+for pattern, dark, light in args.remap:
+    for m in gltf.get("materials", []):
+        tex = m.get("pbrMetallicRoughness", {}).get("baseColorTexture")
+        if tex is not None and re.search(pattern, m.get("name", "")):
+            remaps[gltf["textures"][tex["index"]]["source"]] = (hex_rgb(dark), hex_rgb(light), m["name"])
+    if not any(re.search(pattern, m.get("name", "")) for m in gltf.get("materials", [])):
+        print(f"--remap {pattern}: no material matches, skipped")
+
+
+def remap(img, dark, light):
+    lum = img.convert("L")
+    return Image.merge("RGB", [lum.point(lambda v, d=d, l=l: round(d + (l - d) * v / 255)) for d, l in zip(dark, light)])
+
+
 # Rebuild the binary chunk view by view, re-encoding images.
 new_bin = bytearray()
 for vi, v in enumerate(views):
@@ -49,6 +75,10 @@ for vi, v in enumerate(views):
         img = Image.open(io.BytesIO(raw))
         before = img.size
         img.thumbnail((args.max, args.max), Image.LANCZOS)
+        if image_views[vi] in remaps:
+            dark, light, name = remaps[image_views[vi]]
+            img = remap(img, dark, light)
+            print(f"{im.get('name', vi)} ({name}): remapped to {dark}..{light}")
         buf = io.BytesIO()
         # Every map here is opaque, so JPEG is fine even for normal and
         # metallic/roughness maps at this size.
