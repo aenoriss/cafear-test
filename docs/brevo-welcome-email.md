@@ -1,33 +1,17 @@
 # Welcome Email en Brevo
 
-La experiencia agrega cada Lead a la lista **Nomad Hub — AR bolsa** (carpeta *Experiencias*), con los campos `NOMBRE`, `ORIGEN = bolsa-ar` y `CONSENTIMIENTO` (fecha). La lista y los campos se crean solos con el primer Lead. Brevo manda el Welcome Email cuando un contacto entra a esa lista; quien ya estaba en la lista no lo vuelve a recibir.
+La experiencia agrega cada Lead a la lista **Nomad Hub — AR bolsa** (carpeta *Experiencias*), con los campos `NOMBRE`, `ORIGEN = bolsa-ar` y `CONSENTIMIENTO` (fecha). Si el contacto no estaba en esa lista, `api/lead.js` le manda el Welcome Email: la plantilla **Nomad Hub — Bienvenida AR bolsa**. Quien ya estaba en la lista no lo vuelve a recibir. No hace falta ninguna automatización en el panel de Brevo.
 
-## Configurarlo (una vez, en app.brevo.com)
+## Editar el email
 
-1. **Automatizaciones → Crear automatización → Mensaje de bienvenida** (o "Crear desde cero").
-2. **Punto de entrada:** "Un contacto se agrega a una lista" → elegí **Nomad Hub — AR bolsa**.
-3. **Acción:** "Enviar un email" → crear el email con el texto de abajo. Remitente: un email de `@nomadhub.ar` verificado en Brevo (Remitentes y dominios).
-4. Activá la automatización.
+La plantilla se crea sola con el primer Lead y después se edita en Brevo: **Campañas → Plantillas → Nomad Hub — Bienvenida AR bolsa** (texto, asunto y remitente). El código nunca la pisa. Para el nombre del contacto usá `{{ params.nombre }}`.
 
-## Texto del email
+## Remitente
 
-**Asunto:** Tu 15% off en Nomad Hub, {{ contact.NOMBRE }}
+Hoy sale del remitente 1 de Brevo, el único verificado (una dirección de Gmail): sirve para la etapa de prueba, pero los envíos desde Gmail a través de Brevo suelen caer en spam. Antes de la campaña real:
 
-**Vista previa:** Tu código de descuento te espera adentro.
+1. Autenticar el dominio `nomadhub.ar` en Brevo (Remitentes, dominios e IP dedicadas → Dominios): Brevo da unos registros DNS para cargar en Hostinger.
+2. Crear el remitente `hola@nomadhub.ar` (con la casilla funcionando, para las respuestas).
+3. Cambiar el remitente en la plantilla, o definir `BREVO_SENDER_ID` en Vercel con el id del nuevo remitente si la plantilla todavía no existe.
 
-> Hola {{ contact.NOMBRE }},
->
-> Gracias por escanear la bolsa de Nomad Hub. Acá tenés tu código:
->
-> **NOMAD15**
->
-> Te da un 15% off en tu próxima compra en nuestra tienda online. Copialo y pegalo al pagar.
->
-> [Ir a la tienda](https://nomadhub.ar/)
->
-> Fuel for nomads,
-> El equipo de Nomad Hub
-
-Brevo agrega solo el enlace para darse de baja al pie del email.
-
-**Pendiente:** cambiar el 15% y el enlace de la tienda cuando estén definidos (también en `offer.js`: `PERCENT` y `STORE_URL`).
+**Pendiente:** cambiar el 15% y el enlace de la tienda cuando estén definidos: en la plantilla de Brevo, en `offer.js` (`PERCENT`, `STORE_URL`) y en `api/lead.js` (solo afecta a la primera versión de la plantilla).
