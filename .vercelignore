@@ -3,3 +3,5 @@ tools/
 editor.html
 config.json.bak
 .env*
+CONTEXT.md
+docs/

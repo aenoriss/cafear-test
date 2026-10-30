@@ -121,7 +121,9 @@ AFRAME.registerComponent('cage-model', {
       const model = this.el.getObject3D('mesh')
       const m = CafeConfig.measureModel(AFRAME.THREE, model)
       model.position.y -= m.baseY
-      this.mixer = CafeConfig.animate(AFRAME.THREE, model, model.animations)
+      this.mixer = CafeConfig.animate(AFRAME.THREE, model, model.animations, {
+        onEnd: (loop) => window.dispatchEvent(new CustomEvent('sequence-end', {detail: {loop}})),
+      })
       this.fx = CafeEffects.install(AFRAME.THREE, model)
       // Compile the effect shaders now rather than mid-sequence, when they first show.
       const {renderer, object3D, camera} = this.el.sceneEl
@@ -399,6 +401,7 @@ AFRAME.registerComponent('qr-table-anchor', {
     if (onScreen && !this.started) {
       this.started = true
       document.body.classList.add('xp-started')
+      window.dispatchEvent(new Event('experience-start'))
       console.log('[app] cage in view: instructions off')
     }
     hint.style.display = onScreen ? 'none' : 'block'

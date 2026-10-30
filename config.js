@@ -139,8 +139,9 @@ window.CafeConfig = (() => {
   // Plays all clips together as one sequence: they are parts of one storyboard
   // with different lengths (7-29 s), so looping each on its own would drift
   // them apart. The sequence ends on its last frame for holdSeconds, then
-  // replays. Call update(seconds) every frame.
-  const animate = (THREE, object, clips, {holdSeconds = 4} = {}) => {
+  // replays. Call update(seconds) every frame. onEnd(loop) fires as each
+  // sequence reaches its last frame (loop 1 is the first).
+  const animate = (THREE, object, clips, {holdSeconds = 4, onEnd = null} = {}) => {
     object.traverse((o) => { if (o.isSkinnedMesh) o.frustumCulled = false })
     const mixer = new THREE.AnimationMixer(object)
     const actions = (clips || []).map((clip) => {
@@ -151,11 +152,15 @@ window.CafeConfig = (() => {
     })
     const length = Math.max(0, ...(clips || []).map(c => c.duration))
     let t = 0
+    let loop = 1
     return {
       length,
       update(dt) {
+        const before = t
         t += dt
+        if (before < length && t >= length && onEnd) onEnd(loop)
         if (t > length + holdSeconds) {
+          loop++
           t = 0
           for (const a of actions) a.reset().play()
         }
