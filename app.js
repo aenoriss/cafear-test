@@ -122,6 +122,10 @@ AFRAME.registerComponent('cage-model', {
       const m = CafeConfig.measureModel(AFRAME.THREE, model)
       model.position.y -= m.baseY
       this.mixer = CafeConfig.animate(AFRAME.THREE, model, model.animations)
+      this.fx = CafeEffects.install(AFRAME.THREE, model)
+      // Compile the effect shaders now rather than mid-sequence, when they first show.
+      const {renderer, object3D, camera} = this.el.sceneEl
+      renderer.compile(object3D, camera)
       console.log(`[app] model ${m.height.toFixed(3)} tall, ${model.animations.length} clip(s), ` +
         `sequence ${this.mixer.length.toFixed(1)} s`)
       // Placement depends on the measured size.
@@ -139,6 +143,7 @@ AFRAME.registerComponent('cage-model', {
       console.log(`[app] animation started, ${((time - this.shownAt) / 1000).toFixed(1)} s after the cage appeared`)
     }
     this.mixer.update(dt / 1000)
+    this.fx.update(dt / 1000)
   },
 })
 

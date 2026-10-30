@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Editor de jaula</title>
   <script src="./config.js"></script>
+  <script src="./effects.js"></script>
   <script type="importmap">
     {"imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
@@ -138,11 +139,13 @@
     const cage = new THREE.Group()
     scene.add(cage)
     let mixer = null
+    let fx = null
     new GLTFLoader().load('assets/jaula.glb', (gltf) => {
       cage.add(gltf.scene)
       const m = CafeConfig.measureModel(THREE, gltf.scene)
       gltf.scene.position.y -= m.baseY
       mixer = CafeConfig.animate(THREE, gltf.scene, gltf.animations)
+      fx = CafeEffects.install(THREE, gltf.scene)
       update()
     })
 
@@ -231,7 +234,9 @@
     resize()
     const clock = new THREE.Clock()
     renderer.setAnimationLoop(() => {
-      mixer?.update(clock.getDelta())
+      const dt = clock.getDelta()
+      mixer?.update(dt)
+      fx?.update(dt)
       controls.update()
       renderer.render(scene, camera)
     })
