@@ -394,6 +394,13 @@ AFRAME.registerComponent('qr-table-anchor', {
     let {x, y} = p
     if (p.z > 1) { x = -x; y = -y }  // behind the camera
     const onScreen = p.z < 1 && Math.abs(x) < 0.9 && Math.abs(y) < 0.9
+    // The first time the cage is in view the experience has started: from then
+    // on no instruction texts (CSS hides them), only the arrow if it leaves.
+    if (onScreen && !this.started) {
+      this.started = true
+      document.body.classList.add('xp-started')
+      console.log('[app] cage in view: instructions off')
+    }
     hint.style.display = onScreen ? 'none' : 'block'
     this.banner.style.display = this.coaching ? 'none' : hint.style.display
     if (onScreen) return

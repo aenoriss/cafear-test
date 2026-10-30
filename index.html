@@ -33,15 +33,27 @@
       pointer-events: none;
     }
     #offscreen .arrow {
-      font-size: 44px; line-height: 1; color: #2ee6a6; text-shadow: 0 1px 3px rgba(0,0,0,.8);
+      font-size: 28px; line-height: 1; color: #2ee6a6; text-shadow: 0 1px 3px rgba(0,0,0,.8);
     }
     #offscreen-text {
       /* Above the record button */
-      position: fixed; z-index: 10; left: 50%; bottom: 140px; transform: translateX(-50%);
-      display: none; padding: 8px 14px; border-radius: 18px; background: rgba(0,0,0,.6);
-      font: 600 15px/1.2 system-ui, sans-serif; color: #fff; white-space: nowrap;
+      position: fixed; z-index: 10; left: 50%; bottom: 120px; transform: translateX(-50%);
+      display: none; padding: 5px 10px; border-radius: 12px; background: rgba(0,0,0,.5);
+      font: 500 12px/1.2 system-ui, sans-serif; color: #fff; white-space: nowrap;
       pointer-events: none;
     }
+    /* 8th Wall's real-scale coaching: its phone animation is 90vmin wide in the
+       middle of the screen. Smaller, and low, above the record button. */
+    .coaching-overlay-prompt-container {
+      top: auto !important; bottom: 110px; transform: translateX(-50%) !important;
+    }
+    .coaching-overlay-animation { width: 34vmin !important; display: block; margin: 0 auto; }
+    .coaching-overlay-prompt-status {
+      font: 500 12px/1.25 system-ui, sans-serif !important; max-width: 16rem !important;
+    }
+    /* Once the cage has been on screen, no more instructions. */
+    body.xp-started #offscreen-text,
+    body.xp-started .coaching-overlay-container { display: none !important; }
     #no-webgl {
       display: none; max-width: 520px; margin: 15vh auto 0; padding: 0 16px;
       font: 16px/1.5 system-ui, sans-serif; color: #eee;
