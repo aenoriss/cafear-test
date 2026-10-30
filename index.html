@@ -53,6 +53,13 @@
     .coaching-overlay-prompt-status {
       font: 500 12px/1.25 system-ui, sans-serif !important; max-width: 16rem !important;
     }
+    /* No 8th Wall branding on xrextras' and the landing page's screens; the
+       engine's licence attribution is on /creditos/, linked below. */
+    .poweredby-img, .landing8-attribution-logo, [class*="poweredby"] { display: none !important; }
+    #credits {
+      position: fixed; z-index: 11; left: 8px; bottom: 6px; color: rgba(255,255,255,.55);
+      font: 10px system-ui, sans-serif; text-decoration: none; text-shadow: 0 1px 2px rgba(0,0,0,.6);
+    }
     /* Once the cage has been on screen, no more instructions. */
     body.xp-started #offscreen-text,
     body.xp-started .coaching-overlay-container { display: none !important; }
@@ -148,6 +155,7 @@
     </div>
   </div>
   <button id="offer-badge" type="button" hidden></button>
+  <a id="credits" href="/creditos/" target="_blank" rel="noopener">Créditos</a>
 
   <!-- Stamped by the script below, so ?desktop can change xrweb before it initialises -->
   <template id="scene-tpl">

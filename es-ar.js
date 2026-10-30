@@ -57,6 +57,8 @@
     'You need to accept motion permissions to continue.': 'Para seguir, tenés que permitir el acceso a los sensores de movimiento.',
     'You\'re almost there!': '¡Ya casi!',
     'You\'ve prevented the page from accessing your motion sensors.': 'Bloqueaste el acceso de la página a los sensores de movimiento.',
+    // A placeholder in xrextras' site-settings steps: the site to look for is this one.
+    'apps.8thwall.com': location.host,
     'app settings': '',
     'app to reenable your motion sensors.': 'y volvé a abrirla para activar los sensores de movimiento.',
     'for easy access.': 'para tenerla a mano.',
