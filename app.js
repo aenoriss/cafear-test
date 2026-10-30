@@ -41,6 +41,8 @@ const cfgReady = CafeConfig.load().then(c => Object.assign(CFG, c))
 // them differ; then each needs its own target.
 const TARGET_NAMES = ['qr-cafear']
 const SMOOTHING = 0.25
+const VIEW_FRACTION = parseFloat(params.get('view')) || 0.35  // cage height / screen height, see trackViewSize
+const SETTLE_MS = 1000
 
 // Always the main (1x) rear camera. 8th Wall asks for facingMode 'environment'
 // and only sometimes picks a device itself: on Android with >2 cameras it
@@ -319,8 +321,12 @@ AFRAME.registerComponent('qr-table-anchor', {
       console.log(`[app] QR ${qrAboveFloor.toFixed(1)} cm above 8th Wall floor: ` +
         (floorOk ? 'using that floor' : `implausible, using qrHeightCm ${CFG.qrHeightCm}`))
     }
+    // Size: in real metres, cageCm; otherwise fixed by the view the first time
+    // the cage is seen (updateOffscreenHint), so the QR's size doesn't matter.
+    // Until then, cageCm assuming the QR is qrCm wide.
     const pose = CafeConfig.placeCage(AFRAME.THREE, {
       center, normal: this.normal, up: this.up, k, floorY: floorOk ? 0 : null,
+      scale: metric ? null : this.viewScale,
     }, CFG, {onQr: DESKTOP})
     this.goalPos.copy(pose.position)
     this.goalQuat.copy(pose.quaternion)
@@ -384,6 +390,38 @@ AFRAME.registerComponent('qr-table-anchor', {
         `\nQR recognition: ${this.locked ? 'off (cage locked)' : 'on'}`
     }
     this.updateOffscreenHint()
+    this.trackViewSize(time)
+  },
+
+  // Without real metres, the size is set by the view, not the QR. The scanning
+  // distance follows the QR's size (people get close until it fills the frame),
+  // so it waits for the distance the user settles at to watch: the whole cage
+  // on screen and the distance steady for SETTLE_MS. The cage's height then
+  // becomes VIEW_FRACTION of the screen height there, and stays that size in
+  // the world. Until then: cageCm assuming the QR is qrCm wide.
+  trackViewSize(time) {
+    if (this.viewScale || (ABSOLUTE_SCALE && this.scaleReady)) return
+    const {THREE} = AFRAME
+    const camera = this.el.sceneEl.camera
+    const h = CafeConfig.CAGE_MODEL.height * this.goalScale
+    const base = this.goalPos.clone()
+    const top = base.clone()
+    top.y += h
+    const mid = base.clone().lerp(top, 0.5)
+    const inView = [base, top].every((p) => {
+      p.project(camera)
+      return p.z < 1 && Math.abs(p.x) < 0.95 && Math.abs(p.y) < 0.95
+    })
+    const d = camera.getWorldPosition(new THREE.Vector3()).distanceTo(mid)
+    this.settle = inView ? (this.settle || []).concat([[time, d]]).filter(([t]) => time - t <= SETTLE_MS) : []
+    if (this.settle.length < 2 || time - this.settle[0][0] < SETTLE_MS * 0.9) return
+    const ds = this.settle.map(([, v]) => v)
+    if ((Math.max(...ds) - Math.min(...ds)) / d > 0.08) return
+    const viewHeight = 2 * d * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)
+    this.viewScale = VIEW_FRACTION * viewHeight / CafeConfig.CAGE_MODEL.height
+    console.log(`[app] cage size set by the view: ${VIEW_FRACTION * 100}% of the screen at ${d.toFixed(2)} units, ` +
+      `${(this.viewScale / this.goalScale).toFixed(2)}x its provisional size`)
+    this.place()
   },
 
   // The QR is scanned from ~20 cm, where the cage on the table below can be out

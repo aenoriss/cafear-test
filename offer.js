@@ -5,8 +5,8 @@
 // shows anyway and the Lead is resent on the next visit. The phone remembers a
 // Lead, so a returning one gets the badge with the code and no Offer.
 (() => {
-  const CODE = 'NOMAD15'
-  const PERCENT = 15  // placeholder until the real discount is confirmed
+  const CODE = 'NOMAD10'
+  const PERCENT = 10  // off the next purchase
   const STORE_URL = 'https://nomadhub.ar/'  // placeholder until the store exists
   const STORAGE_KEY = 'nomadhub-lead'
   const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
@@ -41,7 +41,7 @@
     const name = $('offer-name'), email = $('offer-email'), consent = $('offer-consent')
     const honeypot = $('offer-website'), submit = $('offer-submit'), copy = $('offer-copy')
 
-    $('offer-title').textContent = `¿Te gustó? ${PERCENT}% off en tu próximo café`
+    $('offer-title').textContent = `¿Te gustó? ${PERCENT}% de descuento en tu próxima compra`
     submit.textContent = `Quiero mi ${PERCENT}%`
     $('offer-code').textContent = CODE
     $('offer-store').href = STORE_URL
@@ -51,7 +51,7 @@
     let openedAt = 0
 
     const showBadge = () => {
-      badge.textContent = lead ? `Tu código: ${CODE}` : `${PERCENT}% OFF`
+      badge.textContent = lead ? `Tu código: ${CODE}` : `${PERCENT}% de descuento`
       badge.hidden = false
     }
     const open = () => {

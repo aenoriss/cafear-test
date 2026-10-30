@@ -14,4 +14,6 @@ Hoy sale del remitente 1 de Brevo, el único verificado (una dirección de Gmail
 2. Crear el remitente `hola@nomadhub.ar` (con la casilla funcionando, para las respuestas).
 3. Cambiar el remitente en la plantilla, o definir `BREVO_SENDER_ID` en Vercel con el id del nuevo remitente si la plantilla todavía no existe.
 
-**Pendiente:** cambiar el 15% y el enlace de la tienda cuando estén definidos: en la plantilla de Brevo, en `offer.js` (`PERCENT`, `STORE_URL`) y en `api/lead.js` (solo afecta a la primera versión de la plantilla).
+**Descuento:** 10% en la próxima compra, código `NOMAD10`. Si cambia, hay que cambiarlo en la plantilla de Brevo, en `offer.js` (`CODE`, `PERCENT`) y en `api/lead.js` (solo afecta a la primera versión de la plantilla).
+
+**Pendiente:** el enlace de la tienda cuando exista (`STORE_URL` en `offer.js` y `api/lead.js`, y el botón de la plantilla).

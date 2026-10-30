@@ -17,16 +17,17 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 // public); id 1 is the account's first verified sender.
 const TEMPLATE_NAME = 'Nomad Hub — Bienvenida AR bolsa'
 const SENDER_ID = Number(process.env.BREVO_SENDER_ID || 1)
-const CODE = 'NOMAD15'
-const PERCENT = 15
+const CODE = 'NOMAD10'
+const PERCENT = 10
 const STORE_URL = 'https://nomadhub.ar/'
+const WELCOME_SUBJECT = `Tu ${PERCENT}% de descuento en Nomad Hub, {{ params.nombre }}`
 const WELCOME_HTML = `<!doctype html><html lang="es"><body style="margin:0;background:#f4f5f7">
 <div style="max-width:480px;margin:0 auto;padding:28px 20px;font:16px/1.5 Arial,sans-serif;color:#1d1e20">
 <div style="background:#fff;border-radius:16px;padding:28px 24px">
 <p style="margin:0 0 14px">Hola {{ params.nombre }},</p>
 <p style="margin:0 0 18px">Gracias por escanear la bolsa de Nomad Hub. Acá tenés tu código:</p>
 <p style="margin:0 0 18px;text-align:center"><span style="display:inline-block;padding:10px 22px;border:2px dashed #2ee6a6;border-radius:10px;background:#e9fbf5;font:700 24px monospace;letter-spacing:2px;color:#0b2b21">${CODE}</span></p>
-<p style="margin:0 0 20px">Te da un ${PERCENT}% off en tu próxima compra en nuestra tienda online. Copialo y pegalo al pagar.</p>
+<p style="margin:0 0 20px">Te da un ${PERCENT}% de descuento en tu próxima compra en nuestra tienda online. Copialo y pegalo al pagar.</p>
 <p style="margin:0 0 22px;text-align:center"><a href="${STORE_URL}" style="display:inline-block;padding:12px 26px;border-radius:10px;background:#2ee6a6;color:#0b2b21;font-weight:bold;text-decoration:none">Ir a la tienda</a></p>
 <p style="margin:0">Fuel for nomads,<br>El equipo de Nomad Hub</p>
 </div>
@@ -70,7 +71,7 @@ const ensureTemplate = () => templateIdPromise ??= (async () => {
     method: 'POST',
     body: {
       templateName: TEMPLATE_NAME,
-      subject: `Tu ${PERCENT}% off en Nomad Hub, {{ params.nombre }}`,
+      subject: WELCOME_SUBJECT,
       sender: {id: SENDER_ID},
       htmlContent: WELCOME_HTML,
       isActive: true,
@@ -139,3 +140,6 @@ module.exports = async (req, res) => {
     return res.status(502).json({ok: false})
   }
 }
+
+// For scripts that refresh the template already in Brevo (it is never overwritten here).
+module.exports.welcomeTemplate = {name: TEMPLATE_NAME, subject: WELCOME_SUBJECT, html: WELCOME_HTML}

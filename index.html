@@ -1,16 +1,17 @@
 <!doctype html>
-<html>
+<html lang="es-AR">
 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
 
-  <title>Nomad Hub AR – test</title>
+  <title>Nomad Hub · Realidad aumentada</title>
   <!-- 8th Wall's desktop landing page draws its QR from this URL (otherwise
        from the address bar, so ?debug etc. would give a QR that isn't the AR
        target). It must stay identical to the URL in qr-cafear.png. -->
   <link rel="canonical" href="https://experiencia.nomadhub.ar/">
+  <script src="./es-ar.js"></script>
   <script crossorigin="anonymous" src="./external/scripts/8frame-1.5.0.min.js"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1/dist/xr.js" async crossorigin="anonymous" data-preload-chunks="slam"></script>
@@ -150,7 +151,9 @@
 
   <!-- Stamped by the script below, so ?desktop can change xrweb before it initialises -->
   <template id="scene-tpl">
-  <a-scene landing-page xrextras-loading xrextras-runtime-error
+  <a-scene landing-page="promptPrefix: Escaneá el código o entrá a; promptSuffix: desde el celular para ver la experiencia;
+      vrPromptPrefix: o entrá a; mediaAlt: Vista previa"
+    xrextras-loading xrextras-runtime-error
     renderer="colorManagement: true" pixel-ratio-cap env-map="src: assets/envmap-city.jpg" xrweb>
 
     <a-assets>

@@ -59,15 +59,17 @@ window.CafeConfig = (() => {
   //   up      unit vector; k: world units per metre;
   //   floorY  world y of the table, or null to use cfg.qrHeightCm instead.
   // onQr stands the cage on the QR itself (desktop webcam preview).
-  const placeCage = (THREE, {center, normal, up, k, floorY = null}, cfg, {onQr = false} = {}) => {
-    const s = cfg.cageCm / 100 / CAGE_MODEL.height
-    const radius = CAGE_MODEL.radius * s
+  // scale: the model's world scale when the caller has fixed it (sized by the
+  // view, not the QR); otherwise cageCm at k world units per metre.
+  const placeCage = (THREE, {center, normal, up, k, floorY = null, scale = null}, cfg, {onQr = false} = {}) => {
+    const worldScale = scale ?? cfg.cageCm / 100 / CAGE_MODEL.height * k
+    const radius = CAGE_MODEL.radius * worldScale
     const right = new THREE.Vector3().crossVectors(normal, up).negate()  // (-n) x up
-    const out = onQr ? 0 : radius + cfg.gapCm / 100
+    const out = onQr ? 0 : radius + cfg.gapCm / 100 * k
     const drop = onQr ? cfg.qrCm / 200 : cfg.qrHeightCm / 100
     const position = center.clone()
       .addScaledVector(right, cfg.xCm / 100 * k)
-      .addScaledVector(normal, out * k)
+      .addScaledVector(normal, out)
       .addScaledVector(up, -drop * k)
     if (floorY !== null) position.y = floorY
 
@@ -77,7 +79,7 @@ window.CafeConfig = (() => {
       .setFromRotationMatrix(new THREE.Matrix4().makeBasis(normal, up, forward))
       .multiply(new THREE.Quaternion().setFromAxisAngle(
         new THREE.Vector3(0, 1, 0), cfg.rotDeg * Math.PI / 180))
-    return {position, quaternion, scale: s * k}
+    return {position, quaternion, scale: worldScale}
   }
 
   const PANEL_CSS = `
